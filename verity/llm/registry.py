@@ -244,7 +244,11 @@ def build_embedder(
     """
     from verity.llm.gemini import GeminiEmbedder
     from verity.llm.offline import LsaEmbedder
-    from verity.llm.openai_compat import OpenAICompatibleEmbedder
+    from verity.llm.openai_compat import (
+        KEY_VARS,
+        OpenAICompatibleEmbedder,
+        supports_embeddings,
+    )
 
     load_dotenv()
     providers: list[Embedder] = []
@@ -254,12 +258,19 @@ def build_embedder(
         if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
             providers.append(GeminiEmbedder())
             described.append("gemini/gemini-embedding-001 (primary)")
-        if os.getenv("OPENCODE_API_KEY") or os.getenv("OPENAI_API_KEY"):
-            providers.append(OpenAICompatibleEmbedder())
-            described.append("opencode (fallback)")
+
+        # Only wire the OpenAI-compatible endpoint if it actually serves
+        # embeddings. OpenRouter is chat-completions only, and adding it here
+        # would guarantee a failed call before every fallback.
+        if any(os.getenv(v) for v in KEY_VARS):
+            if supports_embeddings():
+                providers.append(OpenAICompatibleEmbedder())
+                described.append("openai-compatible (fallback)")
+            else:
+                described.append("openrouter has no embeddings endpoint - skipped")
 
     if not providers:
-        described.append("offline LSA (no API key found)")
+        described.append("offline LSA (no embedding provider available)")
         return LsaEmbedder(), described
 
     return CachedEmbedder(EmbedderChain(providers), cache_dir=cache_dir), described
@@ -269,7 +280,7 @@ def build_generator(*, offline_only: bool = False) -> tuple[TextGenerator, list[
     """Assemble the generation chain from whatever credentials are present."""
     from verity.llm.gemini import GeminiGenerator
     from verity.llm.offline import TemplateGenerator
-    from verity.llm.openai_compat import OpenAICompatibleGenerator
+    from verity.llm.openai_compat import KEY_VARS, OpenAICompatibleGenerator
 
     load_dotenv()
     providers: list[TextGenerator] = []
@@ -279,9 +290,10 @@ def build_generator(*, offline_only: bool = False) -> tuple[TextGenerator, list[
         if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
             providers.append(GeminiGenerator())
             described.append("gemini/gemini-2.5-flash (primary)")
-        if os.getenv("OPENCODE_API_KEY") or os.getenv("OPENAI_API_KEY"):
-            providers.append(OpenAICompatibleGenerator())
-            described.append("opencode (fallback)")
+        if any(os.getenv(v) for v in KEY_VARS):
+            generator = OpenAICompatibleGenerator()
+            providers.append(generator)
+            described.append(f"{generator.name}/{generator.model} (fallback)")
 
     # The template generator always terminates the chain: a demo must degrade
     # to something honest rather than raising when every API is unreachable.

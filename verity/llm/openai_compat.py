@@ -1,16 +1,24 @@
 """OpenAI-compatible provider.
 
-Covers any endpoint speaking the OpenAI wire format — OpenCode, OpenRouter,
+Covers any endpoint speaking the OpenAI wire format — OpenRouter, OpenCode,
 Together, Groq, a local llama.cpp or Ollama server. Only ``base_url``, ``model``
 and the key change, which is why this single adapter is worth more than three
 provider-specific ones.
 
-Configured via environment:
+Configured via environment, checked in this order:
 
-    OPENCODE_API_KEY / OPENAI_API_KEY   the bearer token
-    OPENCODE_BASE_URL / OPENAI_BASE_URL endpoint root, default OpenAI's
-    OPENCODE_CHAT_MODEL                 model id for generation
-    OPENCODE_EMBED_MODEL                model id for embeddings
+    OPENROUTER_API_KEY / OPENCODE_API_KEY / OPENAI_API_KEY     bearer token
+    OPENROUTER_BASE_URL / OPENCODE_BASE_URL / OPENAI_BASE_URL  endpoint root
+    OPENROUTER_CHAT_MODEL / OPENCODE_CHAT_MODEL                generation model
+    OPENROUTER_EMBED_MODEL / OPENCODE_EMBED_MODEL              embedding model
+
+Setting ``OPENROUTER_API_KEY`` alone is enough: the base URL defaults to
+OpenRouter's when that key is the one present.
+
+**OpenRouter does not serve embeddings** — it is a chat-completions gateway.
+:func:`supports_embeddings` reports that, so the registry wires it as a
+generation fallback only rather than adding a provider guaranteed to fail on
+every embed call.
 """
 
 from __future__ import annotations
@@ -34,7 +42,15 @@ from verity.llm.base import (
 )
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 TIMEOUT_SECONDS = 60.0
+
+KEY_VARS = ("OPENROUTER_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY")
+BASE_VARS = ("OPENROUTER_BASE_URL", "OPENCODE_BASE_URL", "OPENAI_BASE_URL")
+
+# Endpoints that only implement chat completions. Listing them keeps the
+# registry from wiring an embedding provider that cannot succeed.
+CHAT_ONLY_HOSTS = ("openrouter.ai",)
 
 
 def _resolve(explicit: str | None, *names: str, default: str | None = None) -> str | None:
@@ -47,23 +63,40 @@ def _resolve(explicit: str | None, *names: str, default: str | None = None) -> s
     return default
 
 
+def _default_base_for_key() -> str:
+    """Infer the endpoint from which key is configured.
+
+    An OpenRouter key against OpenAI's base URL is a guaranteed 401, which is
+    exactly the confusing failure this avoids.
+    """
+    if os.getenv("OPENROUTER_API_KEY"):
+        return OPENROUTER_BASE_URL
+    return DEFAULT_BASE_URL
+
+
+def supports_embeddings(base_url: str | None = None) -> bool:
+    url = base_url or _resolve(None, *BASE_VARS, default=_default_base_for_key()) or ""
+    return not any(host in url for host in CHAT_ONLY_HOSTS)
+
+
 class OpenAICompatibleClient:
     """Shared transport for the embedder and generator below."""
 
-    name = "opencode"
-
     def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
-        self._key = _resolve(api_key, "OPENCODE_API_KEY", "OPENAI_API_KEY")
+        self._key = _resolve(api_key, *KEY_VARS)
         self.base_url = (
-            _resolve(base_url, "OPENCODE_BASE_URL", "OPENAI_BASE_URL", default=DEFAULT_BASE_URL)
+            _resolve(base_url, *BASE_VARS, default=_default_base_for_key())
             or DEFAULT_BASE_URL
         ).rstrip("/")
+        # Name the provider after the endpoint actually in use, so telemetry
+        # and audit entries say "openrouter" rather than a stale label.
+        self.name = "openrouter" if "openrouter.ai" in self.base_url else "openai-compatible"
 
     def _require_key(self) -> str:
         if not self._key:
             raise ProviderError(
                 self.name,
-                "no API key found; set OPENCODE_API_KEY in .env",
+                f"no API key found; set one of {', '.join(KEY_VARS)} in .env",
                 retryable=False,
             )
         return self._key
@@ -71,11 +104,14 @@ class OpenAICompatibleClient:
     def post(self, path: str, payload: dict) -> dict:
         key = self._require_key()
         url = f"{self.base_url}/{path.lstrip('/')}"
+        headers = {"Authorization": f"Bearer {key}"}
+        if "openrouter.ai" in self.base_url:
+            # OpenRouter attributes traffic by these; optional but polite.
+            headers["HTTP-Referer"] = "https://github.com/tarungarg18/business-intelligence"
+            headers["X-Title"] = "Verity KPI Engine"
         try:
             with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
-                response = client.post(
-                    url, headers={"Authorization": f"Bearer {key}"}, json=payload
-                )
+                response = client.post(url, headers=headers, json=payload)
         except httpx.HTTPError as exc:
             raise ProviderError(self.name, f"transport error: {exc}") from exc
 
@@ -98,8 +134,23 @@ class OpenAICompatibleEmbedder(OpenAICompatibleClient):
         base_url: str | None = None,
     ) -> None:
         super().__init__(api_key=api_key, base_url=base_url)
-        self.model = _resolve(model, "OPENCODE_EMBED_MODEL", default="text-embedding-3-small") or ""
+        self.model = (
+            _resolve(
+                model,
+                "OPENROUTER_EMBED_MODEL",
+                "OPENCODE_EMBED_MODEL",
+                default="text-embedding-3-small",
+            )
+            or ""
+        )
         self.dimension = dimension
+        if not supports_embeddings(self.base_url):
+            raise ProviderError(
+                self.name,
+                f"{self.base_url} serves chat completions only and has no "
+                f"embeddings endpoint",
+                retryable=False,
+            )
 
     def embed(self, texts: Sequence[str], kind: str = EMBED_DOCUMENT) -> EmbeddingResult:
         texts = list(texts)
@@ -141,7 +192,20 @@ class OpenAICompatibleGenerator(OpenAICompatibleClient):
         base_url: str | None = None,
     ) -> None:
         super().__init__(api_key=api_key, base_url=base_url)
-        self.model = _resolve(model, "OPENCODE_CHAT_MODEL", default="gpt-4o-mini") or ""
+        default_model = (
+            "google/gemma-4-31b-it:free"
+            if "openrouter.ai" in self.base_url
+            else "gpt-4o-mini"
+        )
+        self.model = (
+            _resolve(
+                model,
+                "OPENROUTER_CHAT_MODEL",
+                "OPENCODE_CHAT_MODEL",
+                default=default_model,
+            )
+            or ""
+        )
 
     def generate(
         self,
