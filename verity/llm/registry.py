@@ -1,4 +1,4 @@
-"""Provider chain: Gemini primary, OpenCode fallback, offline floor.
+"""Provider chain: Gemini primary, OpenAI-compatible fallback, HF fallback, offline floor.
 
 Two behaviours worth stating plainly.
 
@@ -280,7 +280,12 @@ def build_generator(*, offline_only: bool = False) -> tuple[TextGenerator, list[
     """Assemble the generation chain from whatever credentials are present."""
     from verity.llm.gemini import GeminiGenerator
     from verity.llm.offline import TemplateGenerator
-    from verity.llm.openai_compat import KEY_VARS, OpenAICompatibleGenerator
+    from verity.llm.openai_compat import (
+        HF_KEY_VARS,
+        KEY_VARS,
+        HuggingFaceGenerator,
+        OpenAICompatibleGenerator,
+    )
 
     load_dotenv()
     providers: list[TextGenerator] = []
@@ -294,6 +299,10 @@ def build_generator(*, offline_only: bool = False) -> tuple[TextGenerator, list[
             generator = OpenAICompatibleGenerator()
             providers.append(generator)
             described.append(f"{generator.name}/{generator.model} (fallback)")
+        if any(os.getenv(v) for v in HF_KEY_VARS):
+            generator = HuggingFaceGenerator()
+            providers.append(generator)
+            described.append(f"{generator.name}/{generator.model} (third fallback)")
 
     # The template generator always terminates the chain: a demo must degrade
     # to something honest rather than raising when every API is unreachable.

@@ -60,7 +60,8 @@ generation:
 
 ```
 GEMINI_API_KEY=...      # primary
-OPENCODE_API_KEY=...    # fallback, any OpenAI-compatible endpoint
+OPENROUTER_API_KEY=...  # generation fallback
+HF_TOKEN=...            # third generation fallback via Hugging Face router
 ```
 
 With **no key at all** the system still runs end to end. It falls back to
@@ -72,6 +73,9 @@ the original plan but pulls in roughly 2 GB of torch to embed a few hundred
 chunks. Embeddings come from an API over plain REST and are cached to disk, so
 after the first build the demo runs offline — which matters more for a live
 pitch than model quality does.
+
+Generation tries Gemini first, then OpenRouter/OpenAI-compatible endpoints,
+then Hugging Face, and finally the offline template floor.
 
 ---
 

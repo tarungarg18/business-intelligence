@@ -21,10 +21,11 @@ shap>=0.44               # driver contribution
 # --- Evidence Engine (retrieval) ---
 # No torch, no ONNX runtime, no local model weights.
 #
-# Embeddings come from an API (Gemini primary, any OpenAI-compatible endpoint
-# as fallback) over plain REST, with results cached to disk so the demo runs
-# offline after the first build. With no key at all the system falls back to
-# TF-IDF + SVD via scikit-learn, which is already a dependency.
+# Embeddings come from an API (Gemini primary, any embedding-capable
+# OpenAI-compatible endpoint as fallback) over plain REST, with results cached
+# to disk so the demo runs offline after the first build. Generation also has
+# OpenRouter/Hugging Face fallbacks. With no key at all the system falls back
+# to TF-IDF + SVD via scikit-learn, which is already a dependency.
 #
 # sentence-transformers was the original plan but pulls in ~2 GB of torch for
 # a corpus of a few hundred chunks. Vector search at this scale is a numpy

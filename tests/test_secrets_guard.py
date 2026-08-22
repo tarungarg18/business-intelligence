@@ -23,10 +23,20 @@ SECRET_PATTERNS = [
     re.compile(r"\bAQ\.[A-Za-z0-9_-]{20,}"),       # Google ephemeral
     re.compile(r"\bAIza[A-Za-z0-9_-]{30,}"),       # Google API key
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),   # GitHub token
+    re.compile(r"\bhf_[A-Za-z0-9]{20,}"),           # Hugging Face token
 ]
 
 # Keys that are expected to appear as empty assignments in the template.
-TEMPLATE_KEYS = ("GEMINI_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY")
+TEMPLATE_KEYS = (
+    "GEMINI_API_KEY",
+    "OPENCODE_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENROUTER_API_KEY",
+    "HF_TOKEN",
+    "HUGGINGFACE_API_KEY",
+    "HUGGINGFACE_TOKEN",
+)
 
 
 def _tracked_files() -> list[Path]:

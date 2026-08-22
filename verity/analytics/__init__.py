@@ -18,15 +18,30 @@ from verity.analytics.anomaly import (
     isolation_scores,
     residual_zscores,
 )
+from verity.analytics.attribution import (
+    AttributionResult,
+    DriverContribution,
+    PVMResult,
+    attribute_window,
+    price_volume_mix,
+)
 from verity.analytics.forecast import ExpectedBaseline, expected_for_window
+from verity.analytics.what_if import SimulationResult, simulate_action
 
 __all__ = [
+    "AttributionResult",
     "DecompositionResult",
+    "DriverContribution",
+    "PVMResult",
+    "SimulationResult",
     "WindowAssessment",
     "assess_window",
+    "attribute_window",
     "decompose",
     "isolation_scores",
+    "price_volume_mix",
     "residual_zscores",
     "ExpectedBaseline",
     "expected_for_window",
+    "simulate_action",
 ]

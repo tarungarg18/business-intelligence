@@ -7,10 +7,10 @@ provider-specific ones.
 
 Configured via environment, checked in this order:
 
-    OPENROUTER_API_KEY / OPENCODE_API_KEY / OPENAI_API_KEY     bearer token
-    OPENROUTER_BASE_URL / OPENCODE_BASE_URL / OPENAI_BASE_URL  endpoint root
-    OPENROUTER_CHAT_MODEL / OPENCODE_CHAT_MODEL                generation model
-    OPENROUTER_EMBED_MODEL / OPENCODE_EMBED_MODEL              embedding model
+    OPENROUTER_API_KEY / OPENCODE_API_KEY / OPENAI_API_KEY       bearer token
+    OPENROUTER_BASE_URL / OPENCODE_BASE_URL / OPENAI_BASE_URL    endpoint root
+    OPENROUTER_CHAT_MODEL / OPENCODE_CHAT_MODEL                  generation model
+    OPENROUTER_EMBED_MODEL / OPENCODE_EMBED_MODEL                embedding model
 
 Setting ``OPENROUTER_API_KEY`` alone is enough: the base URL defaults to
 OpenRouter's when that key is the one present.
@@ -43,14 +43,17 @@ from verity.llm.base import (
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+HUGGINGFACE_BASE_URL = "https://router.huggingface.co/v1"
 TIMEOUT_SECONDS = 60.0
 
 KEY_VARS = ("OPENROUTER_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY")
 BASE_VARS = ("OPENROUTER_BASE_URL", "OPENCODE_BASE_URL", "OPENAI_BASE_URL")
+HF_KEY_VARS = ("HF_TOKEN", "HUGGINGFACE_API_KEY", "HUGGINGFACE_TOKEN")
+HF_MODEL_VARS = ("HF_CHAT_MODEL", "HUGGINGFACE_CHAT_MODEL")
 
 # Endpoints that only implement chat completions. Listing them keeps the
 # registry from wiring an embedding provider that cannot succeed.
-CHAT_ONLY_HOSTS = ("openrouter.ai",)
+CHAT_ONLY_HOSTS = ("openrouter.ai", "router.huggingface.co")
 
 
 def _resolve(explicit: str | None, *names: str, default: str | None = None) -> str | None:
@@ -90,7 +93,12 @@ class OpenAICompatibleClient:
         ).rstrip("/")
         # Name the provider after the endpoint actually in use, so telemetry
         # and audit entries say "openrouter" rather than a stale label.
-        self.name = "openrouter" if "openrouter.ai" in self.base_url else "openai-compatible"
+        if "openrouter.ai" in self.base_url:
+            self.name = "openrouter"
+        elif "router.huggingface.co" in self.base_url:
+            self.name = "huggingface"
+        else:
+            self.name = "openai-compatible"
 
     def _require_key(self) -> str:
         if not self._key:
@@ -255,4 +263,25 @@ class OpenAICompatibleGenerator(OpenAICompatibleClient):
                     self.model, input_tokens, output_tokens
                 ),
             ),
+        )
+
+
+class HuggingFaceGenerator(OpenAICompatibleGenerator):
+    """Hugging Face Inference Providers via its OpenAI-compatible chat router."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str = HUGGINGFACE_BASE_URL,
+    ) -> None:
+        key = _resolve(api_key, *HF_KEY_VARS)
+        super().__init__(
+            model=_resolve(
+                model,
+                *HF_MODEL_VARS,
+                default="meta-llama/Llama-3.1-8B-Instruct:fastest",
+            ),
+            api_key=key,
+            base_url=base_url,
         )
