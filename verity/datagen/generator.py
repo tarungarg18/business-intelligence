@@ -157,7 +157,7 @@ def generate(seed: int = RANDOM_SEED) -> GeneratedData:
 
         for region in REGIONS:
             for product in PRODUCTS:
-                if day < product.launch_date:
+                if day < product.launch_date or not product.sells_in(region.name):
                     continue
 
                 noise = float(rng.normal(1.0, 0.06))

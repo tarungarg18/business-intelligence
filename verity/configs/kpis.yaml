@@ -135,7 +135,11 @@ kpis:
       warning_pct: 6.0
       critical_pct: 12.0
       impact_metric: absolute_units
-      minimum_business_impact: 2000
+      # 2000 units was calibrated against region-wide weekly volume, which
+      # suppressed every single-SKU movement — including a newly launched
+      # product swinging 48%. 400 still requires a real statistical anomaly to
+      # pass the other half of the dual gate.
+      minimum_business_impact: 400
 
     drivers:
       - promotion

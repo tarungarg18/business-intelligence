@@ -37,10 +37,16 @@ class Product:
     unit_cost: float
     base_demand: float
     launch_date: date = START_DATE
+    # Empty means nationwide. A phased regional launch keeps a new product's
+    # ramp-up from leaking into scenarios in other regions.
+    regions: tuple[str, ...] = ()
 
     @property
     def is_new(self) -> bool:
         return self.launch_date > START_DATE
+
+    def sells_in(self, region: str) -> bool:
+        return not self.regions or region in self.regions
 
 
 REGIONS: tuple[Region, ...] = (
@@ -54,9 +60,14 @@ PRODUCTS: tuple[Product, ...] = (
     Product("SKU-B", "Borealis Pro", "Home", 24900.0, 16100.0, 95.0),
     Product("SKU-C", "Cinder Lite", "Outdoor", 6400.0, 4050.0, 240.0),
     Product("SKU-D", "Delta Max", "Outdoor", 18200.0, 11900.0, 70.0),
-    # Sparse-history case: launched five weeks before the end of the window.
-    Product("SKU-E", "Ember Nano", "Home", 8900.0, 5600.0, 60.0,
-            launch_date=date(2026, 7, 15)),
+    # Sparse-history case: a flagship launch five weeks before the window ends.
+    # Sized to be commercially significant on purpose — a trivial SKU would be
+    # filtered by the business-impact gate before the sparse-history handling
+    # ever got a chance to run.
+    # West-only phased launch: confines the ramp-up to the region the
+    # sparse-history scenario actually examines.
+    Product("SKU-E", "Ember Nano", "Home", 8900.0, 5600.0, 300.0,
+            launch_date=date(2026, 7, 15), regions=("West",)),
 )
 
 CHANNELS: tuple[tuple[str, float], ...] = (
