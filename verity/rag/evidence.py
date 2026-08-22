@@ -115,6 +115,9 @@ def retrieve_evidence(
         visible = visible[(visible["product"].isin([product, ""])) | (visible["product"].isna())]
     if kpi:
         visible = visible[(visible["kpi"].isin([kpi, ""])) | (visible["kpi"].isna())]
+    if as_of:
+        timestamps = pd.to_datetime(visible["timestamp"]).dt.date
+        visible = visible[timestamps <= as_of]
 
     candidates = [_row_to_item(row, query, kpi, region, product, as_of) for row in visible.itertuples()]
 
@@ -138,6 +141,7 @@ def build_evidence_pack(
     attribution: AttributionResult,
     query: str | None = None,
     top_k: int = 5,
+    as_of: date | None = None,
 ) -> EvidencePack:
     started = time.perf_counter()
     driver_query = query or " ".join(c.driver for c in attribution.contributions)
@@ -148,7 +152,7 @@ def build_evidence_pack(
         query=query_text,
         kpi=assessment.kpi,
         region=attribution.region,
-        as_of=attribution.window_end,
+        as_of=as_of or attribution.window_end,
         top_k=top_k,
     )
     contradictions = detect_contradictions(evidence)
