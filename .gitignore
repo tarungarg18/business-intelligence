@@ -22,6 +22,7 @@ env/
 data/warehouse.duckdb
 data/warehouse.duckdb.wal
 data/generated/
+data/logs/
 data/processed/
 data/chroma/
 *.duckdb

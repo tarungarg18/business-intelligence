@@ -7,6 +7,7 @@ from verity.semantic.contract import (
     SemanticContract,
     load_contract,
 )
+from verity.semantic.lineage import LineageEdge, LineageGraph, LineageNode, build_lineage_graph
 from verity.semantic.policies import (
     AuthorityVerdict,
     Policy,
@@ -18,8 +19,12 @@ from verity.semantic.policies import (
 __all__ = [
     "ContractError",
     "KPIContract",
+    "LineageEdge",
+    "LineageGraph",
+    "LineageNode",
     "MaterialityVerdict",
     "SemanticContract",
+    "build_lineage_graph",
     "load_contract",
     "AuthorityVerdict",
     "Policy",

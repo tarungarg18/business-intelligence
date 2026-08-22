@@ -1,46 +1,43 @@
-# Verity — KPI Intelligence-to-Action Engine
+# Verity - KPI Intelligence-to-Action Engine
 
-**Accenture Innovation Challenge 2026 — Problem Track 3 (BusinessIntelligence.ai)**
-Team Verity Exchange · IIT Guwahati
+Accenture Innovation Challenge 2026 - Problem Track 3: BusinessIntelligence.ai
+Team Verity Exchange, IIT Guwahati
 
 Verity detects material KPI movements, explains them from governed evidence,
-resolves competing business objectives into a recommended action, and says so
-plainly when the evidence does not support a conclusion.
+resolves competing business objectives into a recommended action, and abstains
+when the evidence does not support a conclusion.
 
-The architectural commitment running through the whole system:
+The central product rule:
 
-> **The LLM is never the source of quantitative truth.**
-> Detection, attribution, forecasting, retrieval, ranking, scoring, and
-> permissions are all deterministic. The LLM receives an Evidence Pack and
-> nothing else.
+> The LLM is never the source of quantitative truth.
 
-The full design document (`Round2_Solution_Plan.md`) is kept outside this
-repository alongside the challenge source material.
-
----
+Detection, attribution, forecasting, retrieval, ranking, scoring, permissions,
+lineage, policy checks and simulation are deterministic. The LLM layer receives
+an Evidence Pack and deterministic outputs only.
 
 ## Status
 
-Under active development against a four-week build plan.
+Round 2 prototype is implemented as a deterministic local demo.
 
 | Component | State |
 |---|---|
-| KPI semantic contract + validation | ✅ working |
-| Business policy KB + decision rights | ✅ working |
-| Synthetic world + recorded ground truth | ✅ working |
-| RBAC / entitlements / audit | ✅ working |
-| DuckDB warehouse + governed queries | ✅ working |
-| Detection (STL + Isolation Forest) | ✅ working |
-| Baseline forecast (ETS + intervals) | ✅ working |
-| Provider-agnostic LLM/embedding layer | ✅ working |
-| Attribution (SHAP, Price–Volume–Mix) | 🚧 next |
-| Evidence Engine (hybrid Graph-RAG) | 🚧 next |
-| Decision War Room | ⬜ planned |
-| Evaluation harness | ⬜ planned |
+| KPI semantic contract + validation | working |
+| Business policy KB + decision rights | working |
+| Synthetic world + recorded ground truth | working |
+| RBAC / entitlements / audit | working |
+| DuckDB warehouse + governed queries | working |
+| Detection (STL + Isolation Forest) | working |
+| Baseline forecast (ETS + intervals) | working |
+| Provider-agnostic LLM/embedding layer | working |
+| Attribution + Price-Volume-Mix | working |
+| Evidence Engine + deterministic reranking | working |
+| Persona narratives + citation guard | working |
+| Decision War Room + action payload | working |
+| Cost governor + feedback store | working |
+| Evaluation harness + model health | working |
+| FastAPI + Streamlit demo surfaces | working |
 
-66 tests passing (`python -m pytest`).
-
----
+83 tests passing with `python -m pytest`.
 
 ## Setup
 
@@ -49,89 +46,85 @@ pip install -r requirements.txt
 
 # Generate the synthetic world and build the warehouse
 python -m verity.scripts.build_data
+
+# Run the deterministic CLI demo
+python -m verity.scripts.demo
+
+# Run the API
+uvicorn verity.app.api.main:app --reload
+
+# Run the demo UI
+streamlit run verity/app/ui/streamlit_app.py
 ```
 
-Run from the repository root; that puts `verity` on the import path.
+API entry points:
 
-### API keys are optional
+| Endpoint | Purpose |
+|---|---|
+| `/health` | service readiness |
+| `/scenarios` | available synthetic scenarios |
+| `/scenario/S1` | full signal to evidence to War Room to action payload |
+| `/lineage/net_revenue` | KPI lineage and definition conflict |
+| `/evaluation` | measured detection, retrieval and abstention metrics |
+| `/model-health` | drift and review panel values |
+| `/audit` | audit log |
+| `/risk-radar` | scenario replay risk table |
 
-Copy `.env.example` to `.env` and add a key to use hosted embeddings and
-generation:
+## API Keys
 
-```
-GEMINI_API_KEY=...      # primary
+Every key is optional. With no hosted provider configured, Verity still runs
+using offline LSA embeddings and a deterministic template generator.
+
+Copy `.env.example` to `.env` and set any of:
+
+```text
+GEMINI_API_KEY=...      # primary embeddings + generation
 OPENROUTER_API_KEY=...  # generation fallback
-HF_TOKEN=...            # third generation fallback via Hugging Face router
+HF_TOKEN=...            # Hugging Face generation fallback
 ```
 
-With **no key at all** the system still runs end to end. It falls back to
-TF-IDF + SVD (LSA) embeddings via scikit-learn and a template generator, and
-says so in the UI rather than pretending otherwise.
+The generation chain is Gemini, OpenRouter/OpenAI-compatible, Hugging Face,
+then offline template. OpenRouter and Hugging Face are chat-only fallbacks here;
+they are skipped for embeddings.
 
-There is deliberately **no local model download**. `sentence-transformers` was
-the original plan but pulls in roughly 2 GB of torch to embed a few hundred
-chunks. Embeddings come from an API over plain REST and are cached to disk, so
-after the first build the demo runs offline — which matters more for a live
-pitch than model quality does.
+## Synthetic Scenarios
 
-Generation tries Gemini first, then OpenRouter/OpenAI-compatible endpoints,
-then Hugging Face, and finally the offline template floor.
-
----
-
-## Why the data is synthetic — and why that is a feature
-
-The world in `verity/datagen/` is generated from a fixed seed, and the
-scenarios are planted deliberately. Each shock runs three ways: a
-counterfactual with no shock, the actual, and one isolated run per causal
-factor. Differencing those yields the **true** contribution of every driver.
-
-That means accuracy can be *measured* rather than asserted:
-
-| Scenario | Movement | Planted truth | Correct behaviour |
+| Scenario | Movement | Planted truth | Expected behaviour |
 |---|---|---|---|
-| **S1** West multi-factor | −12.05% | inventory −7.00 pp · promotion −3.50 pp · competitor −2.00 pp | identify and rank the drivers |
-| **S2** North dip | −9.00% | cause not recoverable from evidence | **abstain** |
-| **S3** New SKU-E | +22.00% | promotion, but <6 weeks history | explain with reduced confidence |
-| **S4** East control | ~0% | nothing planted | **stay silent** (false-alarm check) |
+| S1 West multi-factor | about -12% | inventory, promotion, competitor activity | explain and decide |
+| S2 North contradiction | about -9% | cause is not recoverable from evidence | abstain |
+| S3 SKU-E launch | +22% | promotion with sparse history | explain with lower confidence |
+| S4 East control | about 0% | no shock | stay silent |
 
-S1 also carries a **+0.45 pp interaction residual** — real interaction between
-the three factors that no single-factor attribution can recover. Verity
-displays it as unexplained rather than normalising contributions to 100%.
-
----
+S1 carries an explicit interaction residual. Verity displays that residual
+instead of forcing contributions to sum to 100%.
 
 ## Layout
 
-```
+```text
 verity/
-├── configs/        KPI semantic contract, business policy KB
-├── semantic/       Contract loading, validation, decision rights
-├── datagen/        Synthetic world + ground truth + document corpus
-├── governance/     RBAC, audit, cost governor
-├── store/          DuckDB warehouse
-├── analytics/      STL · Isolation Forest · SHAP · ETS · Price-Volume-Mix
-├── rag/            Evidence Engine: ingest → chunk → embed → retrieve → rerank
-├── investigation/  Hypothesis generation and verification
-├── war_room/       Multi-objective decision synthesis
-├── evaluation/     Measured accuracy, calibration, drift
-└── scripts/        Build and demo entry points
+  app/            FastAPI and Streamlit surfaces
+  analytics/      STL, Isolation Forest, ETS, attribution, PVM, what-if
+  configs/        KPI semantic contract and policy KB
+  datagen/        Synthetic world, ground truth, evidence corpus
+  evaluation/     Measured scenario metrics
+  governance/     RBAC, audit, cost governor, feedback
+  investigation/  Persona narratives and citation verification
+  llm/            Provider abstraction and fallback chain
+  rag/            Evidence Engine and Evidence Pack builder
+  semantic/       KPI contracts, policy loading, lineage graph
+  store/          DuckDB warehouse and governed query path
+  war_room/       Two-round decision synthesis and action payload
 ```
 
----
+## Design Notes
 
-## Design notes
+Only four analytical methods are presented as the core stack: STL + Isolation
+Forest, SHAP-style contribution against planted synthetic truth, ETS forecast,
+and Price-Volume-Mix decomposition.
 
-**Four analytical methods, not seven.** STL + Isolation Forest for detection,
-SHAP for attribution, ETS for the expected baseline, Price–Volume–Mix for
-financial decomposition. Granger causality and Prophet were considered and
-rejected — a short list every team member can defend beats a long list nobody
-can.
+Retrieval-level RBAC filters documents before ranking. A War Room agent cannot
+reason over evidence that the requesting user is not allowed to retrieve.
 
-**Contributions never sum to 100%.** Where attribution falls short of the
-observed movement, the shortfall is shown as an unexplained residual.
-
-**RBAC lives inside retrieval.** Documents carry `access_roles`, and filtering
-happens *before* ranking. An unauthorised document is never a candidate, so a
-War Room agent cannot reason over it — the guarantee is structural, not a
-policy statement.
+Policy documents are retrieved and cited by ID, so decision-rights escalation
+comes from the policy KB rather than a hardcoded threshold.
