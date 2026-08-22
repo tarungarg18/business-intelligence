@@ -1,0 +1,61 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Verity generated artefacts ---
+# The synthetic world is regenerated deterministically from a seed
+# (`python -m verity.scripts.build_data`), so it is never committed.
+data/warehouse.duckdb
+data/warehouse.duckdb.wal
+data/generated/
+data/processed/
+data/chroma/
+*.duckdb
+*.duckdb.wal
+
+# Embedding model cache
+.cache/
+models/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.key
+
+# --- Editors / OS / tooling ---
+# .claude holds a local permission allowlist with machine-specific paths.
+# It churns constantly and means nothing on another machine.
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Large source binaries ---
+# The 18 MB Round 1 deck is excluded to keep clone size sane. Remove this line
+# if you want it versioned -- but note it is far easier to add a large binary
+# than to purge one from history later.
+*.pptx
+
+# --- Everything outside verity/ that is not repo furniture ---
+# Source materials and planning documents stay local; only the codebase is
+# versioned. Repo furniture (.gitignore, README.md, requirements.txt) is kept
+# at the root because a repository without it is not usable.
+.claude
+Round2_Solution_Plan.md
+*.pdf

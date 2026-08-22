@@ -1,0 +1,108 @@
+# Verity — Business Policy Knowledge Base
+#
+# Retrieved as evidence alongside incident documents. The Decision War Room
+# cites these by ID, and decision-rights escalation fires from a RETRIEVED
+# policy rather than a hardcoded constant.
+#
+# Each policy is indexed into the vector store like any other document, and
+# carries the same metadata contract (access_roles, reliability, etc).
+
+version: 1
+
+policies:
+
+  - id: P018
+    title: Discount Approval Policy
+    lever: discount_pct
+    text: >
+      Regional managers may authorize promotional discounts up to 10% of list
+      price without further approval. Discount increases above 10% require CFO
+      approval. Discounts above 20% require both CFO and Chief Revenue Officer
+      sign-off and may not be applied to more than two consecutive periods.
+    authority:
+      role: regional_manager
+      max_value: 10.0
+      unit: percent
+      escalation_role: cfo
+      hard_ceiling: 20.0
+      ceiling_escalation_role: cfo_and_cro
+    source_reliability: 1.0
+    access_roles: [executive, analyst, regional_manager]
+
+  - id: P022
+    title: Emergency Shipping Policy
+    lever: expedite_freight
+    text: >
+      Site supply leads may authorize expedited freight up to INR 200,000 per
+      incident where a fulfilment backlog exceeds 12 hours. Expedite spend above
+      INR 200,000 requires Supply Chain Director approval. All expedite actions
+      must be logged against the originating incident.
+    authority:
+      role: supply_lead
+      max_value: 200000
+      unit: inr
+      escalation_role: supply_chain_director
+    source_reliability: 1.0
+    access_roles: [executive, analyst, regional_manager]
+
+  - id: P031
+    title: Inventory Escalation Policy
+    lever: inventory_reallocation
+    text: >
+      Where regional stock cover falls below 7 days for a priority SKU, the
+      regional supply lead must raise an escalation within one business day.
+      Inter-regional stock reallocation up to 500 units may be authorized by the
+      regional supply lead; larger reallocations require Supply Chain Director
+      approval.
+    authority:
+      role: supply_lead
+      max_value: 500
+      unit: units
+      escalation_role: supply_chain_director
+    source_reliability: 1.0
+    access_roles: [executive, analyst, regional_manager]
+
+  - id: P044
+    title: Regional Pricing Policy
+    lever: list_price_change
+    text: >
+      List price changes are owned by Revenue Operations. Regional managers may
+      not alter list price. Any list price movement greater than 3% requires CFO
+      approval and a 14-day notice period to channel partners.
+    authority:
+      role: revenue_operations
+      max_value: 3.0
+      unit: percent
+      escalation_role: cfo
+    source_reliability: 1.0
+    access_roles: [executive, analyst]
+
+  - id: P057
+    title: Promotion Approval Policy
+    lever: reinstate_promotion
+    text: >
+      Marketing leads may reinstate a lapsed promotion within the same quarter
+      without re-approval, provided the projected gross margin impact does not
+      exceed 1.0 percentage points. Projected margin impact beyond 1.0
+      percentage points requires CFO approval before launch.
+    authority:
+      role: marketing_lead
+      max_value: 1.0
+      unit: percentage_points
+      escalation_role: cfo
+    source_reliability: 1.0
+    access_roles: [executive, analyst, regional_manager]
+
+
+# Role hierarchy used to determine whether a recommended action falls within
+# the convening user's own authority.
+role_hierarchy:
+  regional_manager: 1
+  supply_lead: 1
+  marketing_lead: 1
+  analyst: 1
+  revenue_operations: 2
+  supply_chain_director: 3
+  cfo: 4
+  cfo_and_cro: 5
+  executive: 4

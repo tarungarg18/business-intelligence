@@ -1,0 +1,31 @@
+# Verity — runtime dependencies
+#
+# Everything runs locally. No cloud provisioning is required for the prototype.
+
+# --- Core ---
+pandas>=2.0
+numpy>=1.26
+PyYAML>=6.0
+
+# --- Structured store ---
+duckdb>=1.0
+
+# --- Knowledge graph ---
+networkx>=3.0
+
+# --- Analytical engine ---
+statsmodels>=0.14        # STL decomposition, ETS forecasting
+scikit-learn>=1.4        # Isolation Forest
+shap>=0.44               # driver contribution
+
+# --- Evidence Engine (retrieval) ---
+# Installed at the retrieval milestone; sentence-transformers pulls in torch
+# (~2 GB), so it is kept separate from the analytics path deliberately.
+chromadb>=0.5
+sentence-transformers>=3.0   # serves BAAI/bge-base-en-v1.5
+
+# --- Service + UI ---
+fastapi>=0.110
+uvicorn>=0.29
+streamlit>=1.33
+pydantic>=2.0

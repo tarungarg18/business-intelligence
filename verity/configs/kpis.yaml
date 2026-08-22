@@ -1,0 +1,229 @@
+# Verity — KPI Semantic Contract
+#
+# This file is the single governed definition of business meaning. Every layer
+# reads from it: the analytical engine takes materiality thresholds from here,
+# retrieval takes access rules from here, and the Lineage Visualizer renders it.
+#
+# Nothing else in the system is permitted to hardcode a KPI definition,
+# threshold, or permission rule.
+
+version: 1
+
+kpis:
+
+  - name: net_revenue
+    label: Net Revenue
+    definition:
+      formula: "sum(units * net_unit_price)"
+      unit: INR
+      grain: day
+      description: >
+        Revenue net of returns, excluding freight recovered from customers.
+        This is the authoritative revenue figure for all reporting.
+
+    sources:
+      - name: erp_sales
+        type: sql
+        cadence: daily
+        freshness_sla_hours: 24
+        authoritative: true
+      - name: promotion_api
+        type: api
+        cadence: weekly
+        freshness_sla_hours: 168
+        authoritative: false
+        # Reports gross booked value, not net revenue. Deliberately conflicts
+        # with erp_sales; reconciliation is surfaced, not silently resolved.
+
+    dimensions: [region, product, category, channel]
+
+    materiality:
+      warning_pct: 5.0
+      critical_pct: 10.0
+      impact_metric: absolute_inr
+      minimum_business_impact: 500000
+
+    drivers:
+      - price
+      - volume
+      - mix
+      - promotion
+      - inventory
+      - competitor_activity
+
+    ownership:
+      business_owner: Revenue Operations
+      analyst_owner: BI Team
+
+    access:
+      roles: [executive, analyst, regional_manager]
+      row_filter:
+        regional_manager: "region = user.region"
+
+    lineage:
+      - erp_sales.units
+      - erp_sales.net_unit_price
+      - transform.daily_revenue
+      - kpi.net_revenue
+
+  - name: gross_margin_pct
+    label: Gross Margin %
+    definition:
+      formula: "100 * (sum(units * net_unit_price) - sum(units * unit_cost)) / sum(units * net_unit_price)"
+      unit: percent
+      grain: day
+      description: >
+        Gross margin as a percentage of net revenue. Movement is measured in
+        percentage points, not relative percent.
+
+    sources:
+      - name: erp_sales
+        type: sql
+        cadence: daily
+        freshness_sla_hours: 24
+        authoritative: true
+
+    dimensions: [region, product, category]
+
+    materiality:
+      warning_pct: 1.5
+      critical_pct: 3.0
+      impact_metric: percentage_points
+      minimum_business_impact: 1.0
+
+    drivers:
+      - price
+      - mix
+      - promotion
+      - input_cost
+      - freight
+
+    ownership:
+      business_owner: Finance
+      analyst_owner: BI Team
+
+    access:
+      roles: [executive, analyst]
+      row_filter: {}
+      # Deliberately excludes regional_manager: margin is column-restricted.
+
+    lineage:
+      - erp_sales.units
+      - erp_sales.net_unit_price
+      - erp_sales.unit_cost
+      - transform.daily_margin
+      - kpi.gross_margin_pct
+
+  - name: units_sold
+    label: Units Sold
+    definition:
+      formula: "sum(units)"
+      unit: units
+      grain: day
+      description: Total physical units dispatched and invoiced.
+
+    sources:
+      - name: erp_sales
+        type: sql
+        cadence: daily
+        freshness_sla_hours: 24
+        authoritative: true
+
+    dimensions: [region, product, category, channel]
+
+    materiality:
+      warning_pct: 6.0
+      critical_pct: 12.0
+      impact_metric: absolute_units
+      minimum_business_impact: 2000
+
+    drivers:
+      - promotion
+      - inventory
+      - price
+      - competitor_activity
+      - seasonality
+
+    ownership:
+      business_owner: Supply Chain
+      analyst_owner: BI Team
+
+    access:
+      roles: [executive, analyst, regional_manager]
+      row_filter:
+        regional_manager: "region = user.region"
+
+    lineage:
+      - erp_sales.units
+      - transform.daily_units
+      - kpi.units_sold
+
+  - name: customer_churn
+    label: Customer Churn %
+    definition:
+      formula: "100 * churned_accounts / active_accounts_start"
+      unit: percent
+      grain: week
+      description: >
+        Share of accounts active at period start that lapsed during the period.
+        Weekly grain — deliberately coarser than the revenue KPIs.
+
+    sources:
+      - name: crm_accounts
+        type: sql
+        cadence: weekly
+        freshness_sla_hours: 168
+        authoritative: true
+
+    dimensions: [region, segment]
+
+    materiality:
+      warning_pct: 0.8
+      critical_pct: 1.5
+      impact_metric: percentage_points
+      minimum_business_impact: 0.5
+
+    drivers:
+      - service_level
+      - price
+      - competitor_activity
+      - support_backlog
+
+    ownership:
+      business_owner: Customer Success
+      analyst_owner: BI Team
+
+    access:
+      roles: [executive, analyst]
+      row_filter: {}
+
+    lineage:
+      - crm_accounts.churned_accounts
+      - crm_accounts.active_accounts_start
+      - transform.weekly_churn
+      - kpi.customer_churn
+
+
+# Cross-KPI causal edges. Used for contagion / Risk Radar propagation and for
+# multi-hop graph retrieval. Direction is "moves may propagate from -> to".
+kpi_relationships:
+  - from: units_sold
+    to: net_revenue
+    relation: drives
+  - from: net_revenue
+    to: gross_margin_pct
+    relation: influences
+  - from: units_sold
+    to: customer_churn
+    relation: leading_indicator
+
+
+# Known KPI definition conflicts between sources. The engine surfaces these
+# rather than silently preferring the authoritative source.
+definition_conflicts:
+  - kpi: net_revenue
+    authoritative_source: erp_sales
+    conflicting_source: promotion_api
+    authoritative_definition: "Net of returns, excludes freight"
+    conflicting_definition: "Gross booked order value"
+    reason: "Returns excluded + freight treatment"
