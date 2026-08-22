@@ -28,12 +28,17 @@ Under active development against a four-week build plan.
 | KPI semantic contract + validation | ✅ working |
 | Business policy KB + decision rights | ✅ working |
 | Synthetic world + recorded ground truth | ✅ working |
-| RBAC / entitlements | 🚧 in progress |
-| DuckDB warehouse | 🚧 in progress |
-| Analytical engine (STL, IF, SHAP, ETS, PVM) | ⬜ planned |
-| Evidence Engine (hybrid Graph-RAG) | ⬜ planned |
+| RBAC / entitlements / audit | ✅ working |
+| DuckDB warehouse + governed queries | ✅ working |
+| Detection (STL + Isolation Forest) | ✅ working |
+| Baseline forecast (ETS + intervals) | ✅ working |
+| Provider-agnostic LLM/embedding layer | ✅ working |
+| Attribution (SHAP, Price–Volume–Mix) | 🚧 next |
+| Evidence Engine (hybrid Graph-RAG) | 🚧 next |
 | Decision War Room | ⬜ planned |
 | Evaluation harness | ⬜ planned |
+
+66 tests passing (`python -m pytest`).
 
 ---
 
@@ -41,17 +46,32 @@ Under active development against a four-week build plan.
 
 ```bash
 pip install -r requirements.txt
-```
 
-From the repository root:
-
-```bash
 # Generate the synthetic world and build the warehouse
 python -m verity.scripts.build_data
 ```
 
-All commands assume the repository root is on `PYTHONPATH` (running from the
-root satisfies this).
+Run from the repository root; that puts `verity` on the import path.
+
+### API keys are optional
+
+Copy `.env.example` to `.env` and add a key to use hosted embeddings and
+generation:
+
+```
+GEMINI_API_KEY=...      # primary
+OPENCODE_API_KEY=...    # fallback, any OpenAI-compatible endpoint
+```
+
+With **no key at all** the system still runs end to end. It falls back to
+TF-IDF + SVD (LSA) embeddings via scikit-learn and a template generator, and
+says so in the UI rather than pretending otherwise.
+
+There is deliberately **no local model download**. `sentence-transformers` was
+the original plan but pulls in roughly 2 GB of torch to embed a few hundred
+chunks. Embeddings come from an API over plain REST and are cached to disk, so
+after the first build the demo runs offline — which matters more for a live
+pitch than model quality does.
 
 ---
 
