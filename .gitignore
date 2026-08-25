@@ -16,6 +16,21 @@ env/
 .ruff_cache/
 .ipynb_checkpoints/
 
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pytest
+.pytest_cache/
+
+# ChromaDB local storage
+.verity_chroma/
+.test_chroma/
+.compare_chroma/
+
+# Environment
+.env
+
 # --- Verity generated artefacts ---
 # The synthetic world is regenerated deterministically from a seed
 # (`python -m verity.scripts.build_data`), so it is never committed.

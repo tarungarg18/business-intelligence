@@ -10,6 +10,7 @@ from verity.evaluation import evaluate_scenarios
 from verity.governance import DEMO_PRINCIPALS, route_for_assessment
 from verity.investigation import render_narrative, verify_citations
 from verity.rag import build_evidence_pack, retrieve_evidence
+from verity.rag.evidence import _row_to_item
 from verity.scripts.demo import run_demo
 from verity.semantic import load_contract
 from verity.store import Warehouse
@@ -73,6 +74,7 @@ def test_pvm_is_deterministic_arithmetic(warehouse):
 
 def test_retrieval_filters_before_ranking_and_includes_policy(warehouse):
     west = DEMO_PRINCIPALS["west_manager"]
+
     evidence = retrieve_evidence(
         warehouse,
         west,
@@ -81,11 +83,55 @@ def test_retrieval_filters_before_ranking_and_includes_policy(warehouse):
         region="West",
         top_k=8,
     )
+
     ids = {item.id for item in evidence}
+
     assert "E0989" not in ids
     assert "E1042" in ids
     assert any(item.id.startswith("P") for item in evidence)
 
+    scores = [
+        item.semantic_relevance
+        for item in evidence
+    ]
+
+    assert all(
+        score is not None
+        for score in scores
+    )
+
+    final_scores = [
+        item.score
+        for item in evidence
+    ]
+
+    assert final_scores == sorted(
+        final_scores,
+        reverse=True,
+    )
+
+def test_evidence_item_uses_embedding_semantic_score(warehouse):
+    visible = warehouse.documents(
+        DEMO_PRINCIPALS["analyst"]
+    )
+
+    row = next(visible.itertuples())
+
+    semantic_score = 0.87
+
+    item = _row_to_item(
+        row=row,
+        query="inventory shortage causing revenue decline",
+        kpi="net_revenue",
+        region=row.region,
+        product=row.product,
+        as_of=None,
+        semantic_score=semantic_score,
+    )
+
+    assert item.semantic_relevance == pytest.approx(
+        semantic_score
+    )
 
 def test_contradictory_scenario_abstains(warehouse, contract):
     s2 = SCENARIO_BY_ID["S2"]

@@ -4,9 +4,11 @@ The implementation is intentionally small and inspectable: metadata/RBAC
 filtering happens first, then lexical semantic similarity is combined with
 directness, source reliability, recency and graph relevance.
 """
-
 from __future__ import annotations
-
+from verity.rag.semantic_retriever import SemanticRetriever
+from verity.rag.chroma_store import ChromaStore
+SEMANTIC_RETRIEVER = SemanticRetriever()
+CHROMA_STORE = ChromaStore()
 from dataclasses import dataclass, field
 from datetime import date
 import math
@@ -107,30 +109,138 @@ def retrieve_evidence(
     top_k: int = 5,
     policy_book: PolicyBook | None = None,
 ) -> tuple[EvidenceItem, ...]:
-    """Retrieve ranked evidence. RBAC filtering is delegated to Warehouse first."""
+    """Retrieve ranked evidence using RBAC and semantic vector search."""
+
+    # IMPORTANT: security filtering happens first
     visible = warehouse.documents(principal)
+
     if region:
-        visible = visible[(visible["region"].isin([region, ""])) | (visible["region"].isna())]
+        visible = visible[
+            (visible["region"].isin([region, ""]))
+            | (visible["region"].isna())
+        ]
+
     if product:
-        visible = visible[(visible["product"].isin([product, ""])) | (visible["product"].isna())]
+        visible = visible[
+            (visible["product"].isin([product, ""]))
+            | (visible["product"].isna())
+        ]
+
     if kpi:
-        visible = visible[(visible["kpi"].isin([kpi, ""])) | (visible["kpi"].isna())]
+        visible = visible[
+            (visible["kpi"].isin([kpi, ""]))
+            | (visible["kpi"].isna())
+        ]
+
     if as_of:
-        timestamps = pd.to_datetime(visible["timestamp"]).dt.date
+        timestamps = pd.to_datetime(
+            visible["timestamp"]
+        ).dt.date
+
         visible = visible[timestamps <= as_of]
 
-    candidates = [_row_to_item(row, query, kpi, region, product, as_of) for row in visible.itertuples()]
+    visible_rows = list(visible.itertuples())
 
+    # Nothing available after security/metadata filtering
+    if not visible_rows:
+        candidates = []
+
+    else:
+        documents = [
+            f"{row.title} {row.text}"
+            for row in visible_rows
+        ]
+
+        ids = [
+            str(row.id)
+            for row in visible_rows
+        ]
+
+        # Store embeddings persistently in ChromaDB
+        CHROMA_STORE.add_documents(
+            documents=documents,
+            ids=ids,
+        )
+
+        # Use the validated semantic retriever for candidate selection
+        semantic_results = SEMANTIC_RETRIEVER.search(
+            query=query,
+            documents=documents,
+            top_k=min(len(documents), 20),
+        )
+
+        candidates = [
+            _row_to_item(
+                row=visible_rows[result.index],
+                query=query,
+                kpi=kpi,
+                region=region,
+                product=product,
+                as_of=as_of,
+                semantic_score=result.score,
+            )
+            for result in semantic_results
+        ]
+
+    # Existing final ranking remains unchanged
+    ranked = sorted(
+        candidates,
+        key=lambda e: (e.score, e.reliability),
+        reverse=True,
+    )
+
+    selected = ranked[:top_k]
+
+    # If the query requires policy evidence, guarantee that at least
+    # one visible policy is included in the final evidence set.
+    # Add policy evidence when the query requires it
     if _needs_policy(query):
         policy_book = policy_book or load_policies()
+
         for policy in policy_book.visible_to(principal.role):
             text = policy.as_evidence()["text"]
+
             candidates.append(
-                _score_policy(policy.id, policy.title, policy.lever, text, query, as_of)
+                _score_policy(
+                    policy.id,
+                    policy.title,
+                    policy.lever,
+                    text,
+                    query,
+                    as_of,
+                )
             )
 
-    ranked = sorted(candidates, key=lambda e: (e.score, e.reliability), reverse=True)
-    return tuple(ranked[:top_k])
+
+    # Rank all evidence
+    ranked = sorted(
+        candidates,
+        key=lambda e: (
+            e.score,
+            e.reliability,
+        ),
+        reverse=True,
+    )
+
+    selected = ranked[:top_k]
+
+
+    # Guarantee one policy item for a policy-related query
+    if _needs_policy(query) and not any(
+        item.id.startswith("P")
+        for item in selected
+    ):
+        policy_items = [
+            item
+            for item in ranked
+            if item.id.startswith("P")
+        ]
+
+        if policy_items:
+            selected[-1] = policy_items[0]
+
+
+    return tuple(selected)
 
 
 def build_evidence_pack(
@@ -206,14 +316,46 @@ def detect_contradictions(evidence: Iterable[EvidenceItem]) -> tuple[Contradicti
     return tuple(out)
 
 
-def _row_to_item(row, query: str, kpi: str, region: str | None, product: str | None, as_of: date | None) -> EvidenceItem:
-    timestamp = pd.to_datetime(row.timestamp).date() if getattr(row, "timestamp", None) else None
+def _row_to_item(
+    row,
+    query: str,
+    kpi: str,
+    region: str | None,
+    product: str | None,
+    as_of: date | None,
+    semantic_score: float,
+) -> EvidenceItem:
+
+    timestamp = (
+        pd.to_datetime(row.timestamp).date()
+        if getattr(row, "timestamp", None)
+        else None
+    )
+
     reliability = float(row.source_reliability)
-    semantic = _jaccard(query, f"{row.title} {row.text}")
+
+    # Semantic similarity now comes from embeddings
+    semantic = semantic_score
+
     directness = _directness(query, row.text)
+
     recency = _recency(timestamp, as_of)
-    graph = _graph_relevance(row, kpi, region, product)
-    score = _score(semantic, directness, reliability, recency, graph)
+
+    graph = _graph_relevance(
+        row,
+        kpi,
+        region,
+        product,
+    )
+
+    score = _score(
+        semantic,
+        directness,
+        reliability,
+        recency,
+        graph,
+    )
+
     return EvidenceItem(
         id=row.id,
         source=row.source,
@@ -230,7 +372,9 @@ def _row_to_item(row, query: str, kpi: str, region: str | None, product: str | N
         directness=directness,
         recency=recency,
         graph_relevance=graph,
-        access_roles=tuple((row.access_roles or "").split(",")),
+        access_roles=tuple(
+            (row.access_roles or "").split(",")
+        ),
     )
 
 
