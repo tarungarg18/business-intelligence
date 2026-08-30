@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from verity.semantic.contract import KPIContract, SemanticContract
+from verity.semantic import KPIContract, SemanticContract
 
 
 @dataclass(frozen=True)

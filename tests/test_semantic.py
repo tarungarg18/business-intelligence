@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from verity.semantic import load_contract, load_policies
-from verity.semantic.contract import ContractError
-from verity.semantic.policies import PolicyError
+from verity.semantic import ContractError, PolicyError
 
 
 @pytest.fixture(scope="module")

@@ -1,10 +1,10 @@
-"""Application/API surfaces for the Round 2 demo."""
+"""Application and API surfaces."""
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from verity.app.api.main import app
+from verity.app.api import app
 from verity.app.service import VerityDemoService
 
 

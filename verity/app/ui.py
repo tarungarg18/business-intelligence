@@ -1,7 +1,7 @@
 """Streamlit demo UI for Verity.
 
 Run with:
-    streamlit run verity/app/ui/streamlit_app.py
+    streamlit run verity/app/ui.py
 """
 
 from __future__ import annotations

@@ -1,14 +1,16 @@
 """Hybrid Graph-RAG style retrieval without hidden model judgement.
 
 The implementation is intentionally small and inspectable: metadata/RBAC
-filtering happens first, then lexical semantic similarity is combined with
-directness, source reliability, recency and graph relevance.
+filtering happens first, then semantic similarity is combined with directness,
+source reliability, recency and graph relevance.
+
+Semantic similarity comes from the embedding-based :class:`SemanticRetriever`
+when it is usable, and degrades to deterministic lexical (Jaccard) overlap
+otherwise. Both the retriever and the Chroma vector store are constructed lazily
+so importing this module never loads a model or touches disk.
 """
 from __future__ import annotations
-from verity.rag.semantic_retriever import SemanticRetriever
-from verity.rag.chroma_store import ChromaStore
-SEMANTIC_RETRIEVER = SemanticRetriever()
-CHROMA_STORE = ChromaStore()
+
 from dataclasses import dataclass, field
 from datetime import date
 import math
@@ -20,10 +22,40 @@ import pandas as pd
 
 from verity.analytics.attribution import AttributionResult
 from verity.governance.rbac import Principal
-from verity.semantic.policies import PolicyBook, load_policies
+from verity.semantic import PolicyBook, load_policies
 from verity.store import Warehouse
 
 TOKEN_RE = re.compile(r"[a-z0-9_]+")
+
+_SEMANTIC_RETRIEVER = None
+_CHROMA_STORE = None
+
+
+def _semantic_retriever():
+    """Lazily build the shared semantic retriever; ``None`` if unavailable."""
+    global _SEMANTIC_RETRIEVER
+    if _SEMANTIC_RETRIEVER is None:
+        try:
+            from verity.rag.semantic_retriever import SemanticRetriever
+
+            _SEMANTIC_RETRIEVER = SemanticRetriever()
+        except Exception:  # noqa: BLE001 - retrieval must never fail to import
+            _SEMANTIC_RETRIEVER = False
+    return _SEMANTIC_RETRIEVER or None
+
+
+def _chroma_store():
+    """Lazily build the shared Chroma store; ``None`` if unavailable."""
+    global _CHROMA_STORE
+    if _CHROMA_STORE is None:
+        try:
+            from verity.rag.chroma_store import ChromaStore
+
+            store = ChromaStore()
+            _CHROMA_STORE = store if getattr(store, "available", False) else False
+        except Exception:  # noqa: BLE001
+            _CHROMA_STORE = False
+    return _CHROMA_STORE or None
 
 DRIVER_TERMS = {
     "inventory": {"inventory", "stock", "warehouse", "dispatch", "backlog", "availability"},
@@ -109,138 +141,94 @@ def retrieve_evidence(
     top_k: int = 5,
     policy_book: PolicyBook | None = None,
 ) -> tuple[EvidenceItem, ...]:
-    """Retrieve ranked evidence using RBAC and semantic vector search."""
+    """Retrieve ranked evidence. RBAC filtering is delegated to Warehouse first."""
 
-    # IMPORTANT: security filtering happens first
+    # IMPORTANT: security / metadata filtering happens BEFORE ranking, so an
+    # unauthorised document is never a scoring candidate in the first place.
     visible = warehouse.documents(principal)
 
     if region:
         visible = visible[
-            (visible["region"].isin([region, ""]))
-            | (visible["region"].isna())
+            (visible["region"].isin([region, ""])) | (visible["region"].isna())
         ]
-
     if product:
         visible = visible[
-            (visible["product"].isin([product, ""]))
-            | (visible["product"].isna())
+            (visible["product"].isin([product, ""])) | (visible["product"].isna())
         ]
-
     if kpi:
-        visible = visible[
-            (visible["kpi"].isin([kpi, ""]))
-            | (visible["kpi"].isna())
-        ]
-
+        visible = visible[(visible["kpi"].isin([kpi, ""])) | (visible["kpi"].isna())]
     if as_of:
-        timestamps = pd.to_datetime(
-            visible["timestamp"]
-        ).dt.date
-
+        timestamps = pd.to_datetime(visible["timestamp"]).dt.date
         visible = visible[timestamps <= as_of]
 
     visible_rows = list(visible.itertuples())
-
-    # Nothing available after security/metadata filtering
-    if not visible_rows:
-        candidates = []
-
-    else:
-        documents = [
-            f"{row.title} {row.text}"
-            for row in visible_rows
-        ]
-
-        ids = [
-            str(row.id)
-            for row in visible_rows
-        ]
-
-        # Store embeddings persistently in ChromaDB
-        CHROMA_STORE.add_documents(
-            documents=documents,
-            ids=ids,
-        )
-
-        # Use the validated semantic retriever for candidate selection
-        semantic_results = SEMANTIC_RETRIEVER.search(
+    semantics = _semantic_scores(query, visible_rows)
+    candidates = [
+        _row_to_item(
+            row=row,
             query=query,
-            documents=documents,
-            top_k=min(len(documents), 20),
+            kpi=kpi,
+            region=region,
+            product=product,
+            as_of=as_of,
+            semantic_score=(semantics[i] if semantics is not None else None),
         )
+        for i, row in enumerate(visible_rows)
+    ]
 
-        candidates = [
-            _row_to_item(
-                row=visible_rows[result.index],
-                query=query,
-                kpi=kpi,
-                region=region,
-                product=product,
-                as_of=as_of,
-                semantic_score=result.score,
-            )
-            for result in semantic_results
-        ]
-
-    # Existing final ranking remains unchanged
-    ranked = sorted(
-        candidates,
-        key=lambda e: (e.score, e.reliability),
-        reverse=True,
-    )
-
-    selected = ranked[:top_k]
-
-    # If the query requires policy evidence, guarantee that at least
-    # one visible policy is included in the final evidence set.
-    # Add policy evidence when the query requires it
+    # Retrieval is not restricted to incident documents: when the query touches
+    # decision rights, the policy KB is retrieved and scored the same way, so a
+    # policy can be cited by ID alongside operational evidence.
     if _needs_policy(query):
         policy_book = policy_book or load_policies()
-
         for policy in policy_book.visible_to(principal.role):
             text = policy.as_evidence()["text"]
-
             candidates.append(
-                _score_policy(
-                    policy.id,
-                    policy.title,
-                    policy.lever,
-                    text,
-                    query,
-                    as_of,
-                )
+                _score_policy(policy.id, policy.title, policy.lever, text, query, as_of)
             )
 
-
-    # Rank all evidence
-    ranked = sorted(
-        candidates,
-        key=lambda e: (
-            e.score,
-            e.reliability,
-        ),
-        reverse=True,
-    )
-
+    ranked = sorted(candidates, key=lambda e: (e.score, e.reliability), reverse=True)
     selected = ranked[:top_k]
 
-
-    # Guarantee one policy item for a policy-related query
-    if _needs_policy(query) and not any(
-        item.id.startswith("P")
-        for item in selected
-    ):
-        policy_items = [
-            item
-            for item in ranked
-            if item.id.startswith("P")
-        ]
-
-        if policy_items:
+    # Guarantee at least one policy item survives for a policy-related query.
+    if _needs_policy(query) and not any(item.id.startswith("P") for item in selected):
+        policy_items = [item for item in ranked if item.id.startswith("P")]
+        if policy_items and selected:
             selected[-1] = policy_items[0]
 
-
     return tuple(selected)
+
+
+def _semantic_scores(query: str, rows: list) -> list[float] | None:
+    """Embedding cosine similarity per row, or ``None`` to signal lexical fallback.
+
+    Uses the embedding-based retriever and, when available, persists vectors to
+    the Chroma store. Any failure (missing optional deps, model load error)
+    returns ``None`` so the caller falls back to deterministic Jaccard scoring.
+    """
+    if not rows:
+        return []
+    retriever = _semantic_retriever()
+    if retriever is None:
+        return None
+    # The offline hashing fallback is generic; the domain-aware lexical scorer
+    # (with driver-synonym expansion) is a better and calibrated floor. Only a
+    # genuine neural embedding model supersedes it in the main pipeline.
+    backend = getattr(getattr(retriever, "model", None), "backend", "")
+    if not backend or backend.startswith("hashing"):
+        return None
+    try:
+        documents = [f"{row.title} {row.text}" for row in rows]
+        store = _chroma_store()
+        if store is not None:
+            store.add_documents(documents=documents, ids=[str(row.id) for row in rows])
+        results = retriever.search(query=query, documents=documents, top_k=len(documents))
+        scores = [0.0] * len(rows)
+        for result in results:
+            scores[result.index] = max(0.0, float(result.score))
+        return scores
+    except Exception:  # noqa: BLE001 - never let semantic search break retrieval
+        return None
 
 
 def build_evidence_pack(
@@ -323,7 +311,7 @@ def _row_to_item(
     region: str | None,
     product: str | None,
     as_of: date | None,
-    semantic_score: float,
+    semantic_score: float | None = None,
 ) -> EvidenceItem:
 
     timestamp = (
@@ -334,8 +322,13 @@ def _row_to_item(
 
     reliability = float(row.source_reliability)
 
-    # Semantic similarity now comes from embeddings
-    semantic = semantic_score
+    # Semantic similarity comes from embeddings when available, and from
+    # deterministic lexical overlap as the offline fallback.
+    semantic = (
+        semantic_score
+        if semantic_score is not None
+        else _jaccard(query, f"{row.title} {row.text}")
+    )
 
     directness = _directness(query, row.text)
 

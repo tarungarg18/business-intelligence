@@ -141,6 +141,22 @@ def _active_factors(scenario: Scenario, day: date, region: str, sku: str):
     return scenario.factors
 
 
+def scenario_series(warehouse, scenario, principal):
+    """Governed series for a scenario window, shared by the service and harness.
+
+    Product-scoped scenarios (e.g. a new-SKU launch) query units directly; the
+    rest go through the governed KPI path so row-level RBAC still applies. The
+    warehouse is duck-typed to avoid a datagen -> store import cycle.
+    """
+    if scenario.products:
+        return warehouse.sql(
+            "SELECT date AS period, SUM(units) AS value FROM erp_sales "
+            "WHERE region = ? AND product = ? GROUP BY date ORDER BY date",
+            [scenario.region, scenario.products[0]],
+        )
+    return warehouse.kpi_series(scenario.kpi, principal, region=scenario.region)
+
+
 def generate(seed: int = RANDOM_SEED) -> GeneratedData:
     """Generate the full synthetic world. Deterministic for a given seed."""
     rng = np.random.default_rng(seed)

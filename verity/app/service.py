@@ -7,14 +7,15 @@ from datetime import date
 import time
 
 from verity.analytics import assess_window, attribute_window
-from verity.datagen import DOCUMENTS, SCENARIO_BY_ID, SCENARIOS, generate
+from verity.datagen import DOCUMENTS, SCENARIO_BY_ID, SCENARIOS, generate, scenario_series
 from verity.evaluation import EvaluationReport, evaluate_scenarios
 from verity.governance import DEMO_PRINCIPALS, Principal, route_for_assessment, summarize_cost
 from verity.governance.audit import AuditLog
-from verity.investigation import InvestigationNarrative, render_narrative
+from verity.investigation import InvestigationNarrative, generate_narrative
+from verity.llm import build_generator
+from verity.llm.base import TextGenerator, Usage
 from verity.rag import EvidencePack, build_evidence_pack
-from verity.semantic import SemanticContract, load_contract
-from verity.semantic.lineage import LineageGraph, build_lineage_graph
+from verity.semantic import LineageGraph, SemanticContract, build_lineage_graph, load_contract
 from verity.store import AccessDenied, Warehouse
 from verity.war_room import WarRoomDecision, convene_war_room
 
@@ -51,12 +52,21 @@ class DemoBundle:
                 "unexplained_residual_pp": self.attribution.unexplained_residual_pp,
             },
             "evidence_pack": self.evidence_pack.as_payload(),
-            "narrative": self.narrative.__dict__,
+            "narrative": {
+                "persona": self.narrative.persona,
+                "summary": self.narrative.summary,
+                "bullets": list(self.narrative.bullets),
+                "confidence": self.narrative.confidence,
+                "abstained": self.narrative.abstained,
+                "source": self.narrative.source,
+            },
             "route": self.route.__dict__,
             "cost": {
                 "estimated_cost_inr": self.cost.estimated_cost_inr,
                 "naive_cost_inr": self.cost.naive_cost_inr,
                 "savings_pct": self.cost.savings_pct,
+                "llm_calls": len(self.cost.usages),
+                "total_tokens": sum(u.total_tokens for u in self.cost.usages),
             },
             "decision": _decision_dict(decision) if decision else None,
             "latency_ms": self.latency_ms,
@@ -66,11 +76,28 @@ class DemoBundle:
 class VerityDemoService:
     """One in-memory workspace for deterministic demo execution."""
 
-    def __init__(self, contract: SemanticContract | None = None) -> None:
+    def __init__(
+        self,
+        contract: SemanticContract | None = None,
+        *,
+        use_llm: bool = True,
+    ) -> None:
         self.contract = contract or load_contract()
         self.audit = AuditLog()
         self.warehouse = Warehouse(self.contract, path=None, audit=self.audit)
         self.warehouse.build(generate(), DOCUMENTS)
+        self.generator, self.generator_chain = self._build_generator(use_llm)
+
+    @staticmethod
+    def _build_generator(use_llm: bool) -> tuple[TextGenerator | None, list[str]]:
+        """Build the generation chain, returning ``None`` when only the offline
+        template floor is available so the pipeline uses the richer
+        deterministic narrative instead of the template echo."""
+        if not use_llm:
+            return None, ["llm disabled"]
+        generator, described = build_generator()
+        real = any("offline" not in d for d in described)
+        return (generator if real else None), described
 
     def close(self) -> None:
         self.warehouse.close()
@@ -98,7 +125,7 @@ class VerityDemoService:
         timings: dict[str, float] = {}
 
         started = time.perf_counter()
-        frame = self._series_for(scenario, principal)
+        frame = scenario_series(self.warehouse, scenario, principal)
         assessment = assess_window(
             frame,
             self.contract[scenario.kpi],
@@ -129,10 +156,15 @@ class VerityDemoService:
         timings["retrieval"] = _elapsed(started)
 
         started = time.perf_counter()
-        narrative = render_narrative(pack, persona=persona)
+        narrative = generate_narrative(pack, persona=persona, generator=self.generator)
         route = route_for_assessment(assessment)
-        decision = convene_war_room(pack, principal) if route.war_room_allowed else None
-        cost = summarize_cost(route)
+        decision = (
+            convene_war_room(pack, principal, generator=self.generator)
+            if route.war_room_allowed
+            else None
+        )
+        usages = tuple(narrative.usages) + (tuple(decision.llm_usages) if decision else ())
+        cost = summarize_cost(route, usages)
         timings["reasoning"] = _elapsed(started)
         return DemoBundle(scenario_id, assessment, attribution, pack, narrative, route, cost, decision, timings)
 
@@ -180,15 +212,6 @@ class VerityDemoService:
             )
         return rows
 
-    def _series_for(self, scenario, principal: Principal):
-        if scenario.products:
-            return self.warehouse.sql(
-                "SELECT date AS period, SUM(units) AS value FROM erp_sales "
-                "WHERE region = ? AND product = ? GROUP BY date ORDER BY date",
-                [scenario.region, scenario.products[0]],
-            )
-        return self.warehouse.kpi_series(scenario.kpi, principal, region=scenario.region)
-
 
 def _elapsed(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 2)
@@ -216,5 +239,6 @@ def _decision_dict(decision: WarRoomDecision) -> dict:
         "dissent": decision.dissent,
         "action_payload": decision.action_payload.__dict__,
         "memo": decision.memo,
+        "memo_source": decision.memo_source,
         "converged": decision.converged,
     }

@@ -1,14 +1,11 @@
 """DuckDB warehouse and the governed query path.
 
-Every read of a KPI goes through :meth:`Warehouse.kpi_series`, which:
-
-  1. resolves entitlements from the semantic contract,
-  2. applies the row filter belonging to the caller's own role,
-  3. records the decision in the audit log — allowed or denied,
-  4. and only then executes SQL.
-
-There is no unguarded read path. That is what lets the rest of the system
-treat "the AI cannot see what the human cannot see" as a structural property.
+Every read of a KPI goes through :meth:`Warehouse.kpi_series`, which resolves
+entitlements from the semantic contract, applies the row filter belonging to the
+caller's own role, records the decision in the audit log (allowed or denied), and
+only then executes SQL. There is no unguarded read path, which is what lets the
+rest of the system treat "the AI cannot see what the human cannot see" as a
+structural property rather than a promise.
 """
 
 from __future__ import annotations
@@ -21,11 +18,10 @@ from typing import Any, Mapping
 import duckdb
 import pandas as pd
 
-from verity.datagen.documents import DOCUMENTS, Document
-from verity.datagen.generator import GeneratedData
+from verity.datagen import DOCUMENTS, Document, GeneratedData
 from verity.governance.audit import AuditLog
 from verity.governance.rbac import Principal, authorize_kpi
-from verity.semantic.contract import KPIContract, SemanticContract
+from verity.semantic import SemanticContract
 
 DEFAULT_DB_PATH = Path("data/warehouse.duckdb")
 
@@ -44,9 +40,9 @@ class KPIQuery:
     """SQL realisation of a KPI's contract formula.
 
     The contract carries the human-readable definition; this carries the
-    executable one. ``validate_registry`` asserts the two sets stay in step, so
-    adding a KPI to the contract without implementing it fails loudly at build
-    time rather than silently returning nothing.
+    executable one. ``validate_registry`` asserts the two stay in step, so adding
+    a KPI to the contract without implementing it fails loudly at build time
+    rather than silently returning nothing.
     """
 
     table: str
@@ -94,13 +90,11 @@ def validate_registry(contract: SemanticContract) -> None:
     """Fail loudly if the contract and the SQL registry have drifted apart."""
     declared = set(contract.kpis)
     implemented = set(KPI_QUERIES)
-    missing = declared - implemented
-    orphaned = implemented - declared
     problems = []
-    if missing:
-        problems.append(f"declared in contract but not implemented: {sorted(missing)}")
-    if orphaned:
-        problems.append(f"implemented but absent from contract: {sorted(orphaned)}")
+    if declared - implemented:
+        problems.append(f"declared in contract but not implemented: {sorted(declared - implemented)}")
+    if implemented - declared:
+        problems.append(f"implemented but absent from contract: {sorted(implemented - declared)}")
     if problems:
         raise ValueError("KPI registry is out of step with the semantic contract; " + "; ".join(problems))
 
@@ -117,8 +111,7 @@ class Warehouse:
         validate_registry(contract)
         self.contract = contract
         # Explicit None check, not `audit or AuditLog()`: an empty AuditLog is
-        # falsy by length, so `or` would silently discard the caller's log and
-        # write decisions somewhere they can never read them.
+        # falsy by length, so `or` would silently discard the caller's log.
         self.audit = audit if audit is not None else AuditLog()
         if path is None:
             self._con = duckdb.connect(":memory:")
@@ -127,8 +120,6 @@ class Warehouse:
             self.path = Path(path)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._con = duckdb.connect(str(self.path))
-
-    # -- lifecycle ---------------------------------------------------------
 
     def close(self) -> None:
         self._con.close()
@@ -142,8 +133,6 @@ class Warehouse:
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:
         return self._con
-
-    # -- build -------------------------------------------------------------
 
     def build(self, data: GeneratedData, documents: tuple[Document, ...] = DOCUMENTS) -> None:
         """(Re)create every table from generated data. Idempotent."""
@@ -168,9 +157,7 @@ class Warehouse:
 
     def table_counts(self) -> dict[str, int]:
         tables = [r[0] for r in self._con.execute("SHOW TABLES").fetchall()]
-        return {
-            t: self._con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables
-        }
+        return {t: self._con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
 
     def flush_audit(self) -> int:
         """Persist in-memory audit entries into the warehouse."""
@@ -182,8 +169,6 @@ class Warehouse:
         self._con.execute("INSERT INTO audit_log SELECT * FROM _incoming_audit")
         self._con.unregister("_incoming_audit")
         return len(rows)
-
-    # -- governed reads ----------------------------------------------------
 
     def kpi_series(
         self,
@@ -221,8 +206,8 @@ class Warehouse:
             params.append(end)
 
         # A caller-supplied region narrows the query; the role's own row filter
-        # constrains it. The filter is not caller-supplied, so it cannot be
-        # widened by the request.
+        # constrains it. The filter is not caller-supplied, so a request cannot
+        # widen it.
         effective_region = region or (principal.region if decision.row_filter else None)
         if effective_region:
             where.append(f"{spec.region_column} = ?")
@@ -266,9 +251,7 @@ class Warehouse:
                 "SELECT * FROM ground_truth WHERE scenario_id = ? ORDER BY rank",
                 [scenario_id],
             ).df()
-        return self._con.execute(
-            "SELECT * FROM ground_truth ORDER BY scenario_id, rank"
-        ).df()
+        return self._con.execute("SELECT * FROM ground_truth ORDER BY scenario_id, rank").df()
 
     def sql(self, query: str, params: list[Any] | None = None) -> pd.DataFrame:
         """Escape hatch for analysis code. Not a governed read — do not expose."""

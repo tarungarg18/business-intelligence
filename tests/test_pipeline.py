@@ -1,4 +1,4 @@
-"""Round 2 plan implementation: evidence, action and evaluation."""
+"""End-to-end pipeline: analytics, evidence, action and evaluation."""
 
 from __future__ import annotations
 
@@ -8,13 +8,52 @@ from verity.analytics import assess_window, attribute_window, price_volume_mix, 
 from verity.datagen import DOCUMENTS, SCENARIO_BY_ID, generate
 from verity.evaluation import evaluate_scenarios
 from verity.governance import DEMO_PRINCIPALS, route_for_assessment
-from verity.investigation import render_narrative, verify_citations
+from verity.investigation import generate_narrative, render_narrative, verify_citations
+from verity.llm.base import GenerationResult, Usage
 from verity.rag import build_evidence_pack, retrieve_evidence
 from verity.rag.evidence import _row_to_item
-from verity.scripts.demo import run_demo
+from verity.scripts import run_demo
 from verity.semantic import load_contract
 from verity.store import Warehouse
 from verity.war_room import convene_war_room
+
+
+class _FakeGenerator:
+    """Deterministic stand-in for an LLM so the guardrail loop is testable."""
+
+    name = "fake"
+    model = "fake-v1"
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.calls = 0
+
+    def generate(self, prompt, *, system=None, max_tokens=1024, temperature=0.2):
+        self.calls += 1
+        return GenerationResult(
+            text=self._text,
+            usage=Usage(provider="fake", model="fake-v1", input_tokens=12, output_tokens=8),
+        )
+
+
+def _build_pack(warehouse, contract, scenario_id, principal_key="analyst"):
+    scenario = SCENARIO_BY_ID[scenario_id]
+    assessment = _assessment(warehouse, contract, scenario_id)
+    attribution = attribute_window(
+        warehouse,
+        kpi=scenario.kpi,
+        region=scenario.region,
+        start=scenario.window_start,
+        end=scenario.window_end,
+        scenario_id=scenario.id,
+    )
+    return build_evidence_pack(
+        warehouse,
+        DEMO_PRINCIPALS[principal_key],
+        assessment=assessment,
+        attribution=attribution,
+        query="inventory warehouse dispatch approval policy",
+    )
 
 
 @pytest.fixture(scope="module")
@@ -253,3 +292,43 @@ def test_what_if_numbers_are_deterministic():
     second = simulate_action("discount_pct", 10)
     assert first == second
     assert first.expected_revenue_effect_pp == pytest.approx(5.8)
+
+
+def test_llm_narrative_used_when_faithful(warehouse, contract):
+    pack = _build_pack(warehouse, contract, "S1")
+    eid = pack.evidence[0].id
+    generator = _FakeGenerator(f"Inventory-driven fulfilment issues explain the decline [{eid}].")
+    narrative = generate_narrative(pack, "analyst", generator)
+    assert generator.calls == 1
+    assert narrative.source.startswith("llm:")
+    assert eid in narrative.summary
+    assert not verify_citations(narrative.summary, pack)
+
+
+def test_llm_narrative_guard_rejects_and_regenerates(warehouse, contract):
+    pack = _build_pack(warehouse, contract, "S1")
+    generator = _FakeGenerator("Revenue fell 999% because of aliens [E9999].")
+    narrative = generate_narrative(pack, "analyst", generator, max_attempts=2)
+    # The guard rejects every draft, so the deterministic floor is returned,
+    # but both attempts are still metered for the Cost Governor.
+    assert generator.calls == 2
+    assert narrative.source == "deterministic_template_fallback"
+    assert len(narrative.usages) == 2
+    assert not verify_citations(narrative.summary, pack)
+
+
+def test_narrative_without_generator_is_deterministic(warehouse, contract):
+    pack = _build_pack(warehouse, contract, "S1")
+    narrative = generate_narrative(pack, "analyst", None)
+    assert narrative.source == "deterministic_template"
+    assert narrative.usages == ()
+
+
+def test_war_room_memo_uses_generator_and_meters_usage(warehouse, contract):
+    pack = _build_pack(warehouse, contract, "S1", principal_key="west_manager")
+    eid = pack.evidence[0].id
+    generator = _FakeGenerator(f"Restore priority inventory to recover fulfilment [{eid}].")
+    decision = convene_war_room(pack, DEMO_PRINCIPALS["west_manager"], generator=generator)
+    assert decision.memo_source.startswith("llm:")
+    assert decision.llm_usages
+    assert eid in decision.memo

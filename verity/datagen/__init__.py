@@ -12,7 +12,7 @@ from verity.datagen.entities import (
     START_DATE,
     Scenario,
 )
-from verity.datagen.generator import GeneratedData, generate
+from verity.datagen.generator import GeneratedData, generate, scenario_series
 
 __all__ = [
     "DOCUMENTS",
@@ -30,4 +30,5 @@ __all__ = [
     "Scenario",
     "GeneratedData",
     "generate",
+    "scenario_series",
 ]

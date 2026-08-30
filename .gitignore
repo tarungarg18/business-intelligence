@@ -33,7 +33,7 @@ __pycache__/
 
 # --- Verity generated artefacts ---
 # The synthetic world is regenerated deterministically from a seed
-# (`python -m verity.scripts.build_data`), so it is never committed.
+# (`python -m verity.scripts build`), so it is never committed.
 data/warehouse.duckdb
 data/warehouse.duckdb.wal
 data/generated/
@@ -43,8 +43,9 @@ data/chroma/
 *.duckdb
 *.duckdb.wal
 
-# Embedding model cache
+# Embedding model cache (regenerated deterministically; never committed)
 .cache/
+data/cache/
 models/
 
 # --- Secrets ---
@@ -75,3 +76,7 @@ Thumbs.db
 .claude
 Round2_Solution_Plan.md
 *.pdf
+
+# --- Private prep notes ---
+# Personal deep-dive and interview Q&A. Kept local, never committed.
+INTERVIEW_PREP.md

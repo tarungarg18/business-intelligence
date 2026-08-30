@@ -1,7 +1,7 @@
 # Verity - KPI Intelligence-to-Action Engine
 
 Accenture Innovation Challenge 2026 - Problem Track 3: BusinessIntelligence.ai
-Team Verity Exchange, IIT Guwahati
+Team Verity Exchange
 
 Verity detects material KPI movements, explains them from governed evidence,
 resolves competing business objectives into a recommended action, and abstains
@@ -17,7 +17,7 @@ an Evidence Pack and deterministic outputs only.
 
 ## Status
 
-Round 2 prototype is implemented as a deterministic local demo.
+Working prototype, implemented as a deterministic local demo.
 
 | Component | State |
 |---|---|
@@ -33,7 +33,7 @@ Round 2 prototype is implemented as a deterministic local demo.
 | Evidence Engine + deterministic reranking | working |
 | Persona narratives + citation guard | working |
 | Decision War Room + action payload | working |
-| Cost governor + feedback store | working |
+| Cost governor (tiered routing) | working |
 | Evaluation harness + model health | working |
 | FastAPI + Streamlit demo surfaces | working |
 
@@ -45,16 +45,16 @@ Round 2 prototype is implemented as a deterministic local demo.
 pip install -r requirements.txt
 
 # Generate the synthetic world and build the warehouse
-python -m verity.scripts.build_data
+python -m verity.scripts build
 
 # Run the deterministic CLI demo
-python -m verity.scripts.demo
+python -m verity.scripts demo
 
 # Run the API
-uvicorn verity.app.api.main:app --reload
+uvicorn verity.app.api:app --reload
 
 # Run the demo UI
-streamlit run verity/app/ui/streamlit_app.py
+streamlit run verity/app/ui.py
 ```
 
 API entry points:
@@ -103,18 +103,19 @@ instead of forcing contributions to sum to 100%.
 
 ```text
 verity/
-  app/            FastAPI and Streamlit surfaces
-  analytics/      STL, Isolation Forest, ETS, attribution, PVM, what-if
-  configs/        KPI semantic contract and policy KB
-  datagen/        Synthetic world, ground truth, evidence corpus
-  evaluation/     Measured scenario metrics
-  governance/     RBAC, audit, cost governor, feedback
-  investigation/  Persona narratives and citation verification
-  llm/            Provider abstraction and fallback chain
-  rag/            Evidence Engine and Evidence Pack builder
-  semantic/       KPI contracts, policy loading, lineage graph
-  store/          DuckDB warehouse and governed query path
-  war_room/       Two-round decision synthesis and action payload
+  analytics/         STL, Isolation Forest, ETS, attribution, PVM, what-if
+  app/               FastAPI and Streamlit surfaces
+  configs/           KPI semantic contract and policy KB
+  datagen/           Synthetic world, ground truth, evidence corpus
+  governance/        RBAC, audit, cost governor
+  llm/               Provider abstraction and fallback chain
+  rag/               Evidence Engine and Evidence Pack builder
+  semantic.py        KPI contracts, policy loading, lineage graph
+  store.py           DuckDB warehouse and governed query path
+  investigation.py   Persona narratives and citation verification
+  war_room.py        Two-round decision synthesis and action payload
+  evaluation.py      Measured scenario metrics and calibration
+  scripts.py         CLI: build the warehouse, run the demo
 ```
 
 ## Design Notes

@@ -26,7 +26,7 @@ from sklearn.ensemble import IsolationForest
 from statsmodels.tsa.seasonal import STL
 
 from verity.analytics.forecast import expected_for_window
-from verity.semantic.contract import KPIContract, MaterialityVerdict
+from verity.semantic import KPIContract, MaterialityVerdict
 
 # Weekly seasonality. Trade is strongly day-of-week driven, so this is the
 # period that matters for daily KPI series.

@@ -27,9 +27,14 @@ shap>=0.44               # driver contribution
 # OpenRouter/Hugging Face fallbacks. With no key at all the system falls back
 # to TF-IDF + SVD via scikit-learn, which is already a dependency.
 #
-# sentence-transformers was the original plan but pulls in ~2 GB of torch for
-# a corpus of a few hundred chunks. Vector search at this scale is a numpy
-# dot product; ChromaDB would be infrastructure without a purpose.
+# sentence-transformers + ChromaDB are the plan's neural retrieval stack. They
+# are OPTIONAL: they pull in ~2 GB of torch for a corpus of a few hundred
+# chunks. When installed, the Evidence Engine uses the BGE/MiniLM encoder and a
+# persistent Chroma collection; when absent, it degrades to a deterministic
+# hashing/lexical floor so the demo still runs offline and reproducibly.
+#
+#   pip install "sentence-transformers>=2.2" "chromadb>=0.4"
+#
 httpx>=0.27
 
 # --- Service + UI ---
