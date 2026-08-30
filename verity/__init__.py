@@ -1,7 +1,6 @@
 """Verity — KPI Intelligence-to-Action Engine.
 
 Accenture Innovation Challenge 2026, Problem Track 3 (BusinessIntelligence.ai).
-Team Verity Exchange.
 
 Architectural rule enforced throughout this package: the LLM is never the
 source of quantitative truth. Detection, attribution, forecasting, retrieval,

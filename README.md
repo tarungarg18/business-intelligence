@@ -1,7 +1,6 @@
 # Verity - KPI Intelligence-to-Action Engine
 
 Accenture Innovation Challenge 2026 - Problem Track 3: BusinessIntelligence.ai
-Team Verity Exchange
 
 Verity detects material KPI movements, explains them from governed evidence,
 resolves competing business objectives into a recommended action, and abstains
@@ -37,7 +36,7 @@ Working prototype, implemented as a deterministic local demo.
 | Evaluation harness + model health | working |
 | FastAPI + Streamlit demo surfaces | working |
 
-83 tests passing with `python -m pytest`.
+91 tests passing with `python -m pytest`.
 
 ## Setup
 
