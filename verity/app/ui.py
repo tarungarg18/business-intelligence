@@ -6,11 +6,21 @@ Run with:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Streamlit runs this file directly, which puts verity/app on sys.path instead
+# of the repo root, so `import verity` would fail. Add the root ourselves.
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import pandas as pd
 import streamlit as st
 
 from verity.app.service import VerityDemoService
 from verity.governance import DEMO_PRINCIPALS
+from verity.store import AccessDenied
 
 
 @st.cache_resource
@@ -30,11 +40,21 @@ scenario_id = left.selectbox("Scenario", list(scenario_options), index=0)
 principal_key = right.selectbox("User", ["analyst", "cfo", "west_manager", "east_manager"], index=0)
 persona = right.selectbox("Persona view", ["analyst", "cfo", "ops"], index=0)
 
-bundle = service.run_scenario(
-    scenario_options[scenario_id],
-    principal=DEMO_PRINCIPALS[principal_key],
-    persona=persona,
-)
+try:
+    bundle = service.run_scenario(
+        scenario_options[scenario_id],
+        principal=DEMO_PRINCIPALS[principal_key],
+        persona=persona,
+    )
+except AccessDenied as exc:
+    st.error(f"Access denied by governance: {exc.reason}")
+    st.info(
+        "This is row-level RBAC working as designed — the AI cannot read data the "
+        "user is not entitled to. Pick a scenario in this user's region, or switch "
+        "to analyst or cfo for full visibility."
+    )
+    st.stop()
+
 payload = bundle.as_dict()
 
 metrics = payload["assessment"]
