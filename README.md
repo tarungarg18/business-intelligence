@@ -1,130 +1,332 @@
-# Verity - KPI Intelligence-to-Action Engine
+# Verity — KPI Intelligence-to-Action Engine
 
-Accenture Innovation Challenge 2026 - Problem Track 3: BusinessIntelligence.ai
+Accenture Innovation Challenge 2026 · Problem Track 3: **BusinessIntelligence.ai**
 
-Verity detects material KPI movements, explains them from governed evidence,
-resolves competing business objectives into a recommended action, and abstains
-when the evidence does not support a conclusion.
+Verity turns a KPI movement into a **governed decision**: detect whether the
+change is material, explain *why* with ranked drivers and cited evidence,
+recommend *what to do* with the right approvals — or **abstain** when the
+evidence is insufficient or contradictory.
 
-The central product rule:
+## The central rule
 
-> The LLM is never the source of quantitative truth.
+> **The LLM is never the source of quantitative truth.**
 
-Detection, attribution, forecasting, retrieval, ranking, scoring, permissions,
-lineage, policy checks and simulation are deterministic. The LLM layer receives
-an Evidence Pack and deterministic outputs only.
+Detection, forecasting, attribution, retrieval, ranking, scoring, permissions,
+policy checks, and simulation are **deterministic**. The language model only
+receives a finished **Evidence Pack** and phrases a narrative or boardroom memo.
+Every draft is checked by a **citation guard**: invented evidence IDs or numbers
+are rejected, and the system falls back to a deterministic template.
 
-## Status
+---
 
-Working prototype, implemented as a deterministic local demo.
+## What this repository does
 
-| Component | State |
+Enterprises already have dashboards that show “revenue fell.” They still spend
+hours answering the real questions:
+
+1. Is this unusual, or just seasonality?
+2. Does it matter commercially?
+3. Which drivers contributed, and how much is unexplained interaction?
+4. What documents and policies support that story?
+5. Are we confident enough to act — or should we abstain?
+6. What action, who owns it, who must approve it, what trade-off?
+
+**Verity answers that sequence end to end** on a synthetic but realistic world
+(ERP sales, marketing API, CRM churn, ops tickets, news, policies) so every
+claim can be checked against **planted ground truth**.
+
+### Pipeline (one request)
+
+```text
+Principal (who is asking)
+        │
+        ▼
+Governed KPI read (DuckDB + RBAC) ── deny? → audited AccessDenied
+        │
+        ▼
+Analytical engine
+  · ETS baseline (fitted only on history *before* the window)
+  · STL residual + Isolation Forest
+  · Dual materiality (statistical + business impact)
+        │
+        ▼
+Attribution (ranked drivers + unexplained residual)
+        │
+        ▼
+Evidence Engine (RBAC filter → retrieve → 5-factor rerank → contradictions)
+        │
+        ▼
+Evidence Pack  ──►  narrative (LLM + citation guard, or template)
+                 └──► Cost Governor tier
+                        · Tier 0  rules only (no LLM / no War Room)
+                        · Tier 2  evidence narrative
+                        · Tier 3  Decision War Room → action payload
+```
+
+### What is deterministic vs LLM
+
+| Deterministic (truth) | LLM (phrasing only) |
 |---|---|
-| KPI semantic contract + validation | working |
-| Business policy KB + decision rights | working |
-| Synthetic world + recorded ground truth | working |
-| RBAC / entitlements / audit | working |
-| DuckDB warehouse + governed queries | working |
-| Detection (STL + Isolation Forest) | working |
-| Baseline forecast (ETS + intervals) | working |
-| Provider-agnostic LLM/embedding layer | working |
-| Attribution + Price-Volume-Mix | working |
-| Evidence Engine + deterministic reranking | working |
-| Persona narratives + citation guard | working |
-| Decision War Room + action payload | working |
-| Cost governor (tiered routing) | working |
-| Evaluation harness + model health | working |
-| FastAPI + Streamlit demo surfaces | working |
+| KPI values, materiality, ETS forecast | Investigation narrative wording |
+| STL / Isolation Forest flags | War Room memo wording |
+| Driver contributions + residual | Persona tone (CFO / analyst / ops) |
+| Retrieval ranking & confidence | — |
+| Policy authority & escalation | — |
+| What-if simulation effects | — |
+| RBAC allow / deny + audit | — |
 
-91 tests passing with `python -m pytest`.
+---
 
-## Setup
+## How it works for every demo case
+
+Use these in the Streamlit UI (**Scenario** + **User**). Prefer **User = analyst**
+unless you are demonstrating RBAC.
+
+### S1 — West multi-factor shock → **explain and decide**
+
+| | |
+|---|---|
+| **What happens** | West `net_revenue` falls ~12% in one week. |
+| **Planted causes** | Inventory (dominant) → promotion lapse → competitor (weakest). |
+| **System behaviour** | Detected + material + critical. Drivers ranked with an **interaction residual** (not forced to 100%). Evidence cites ops / tickets / promo / news. Cost Governor routes to **War Room**. Action e.g. expedite inventory under policy **P031**, with owner, approval, 24h monitoring. |
+| **What to notice** | Residual row; evidence scores; action payload JSON; route = `decision_war_room`. |
+
+### S2 — North contradiction → **abstain**
+
+| | |
+|---|---|
+| **What happens** | North revenue dips, but documents disagree (tickets vs “no incident”, stale marketing note). |
+| **Planted truth** | Cause is **not** recoverable from evidence on purpose. |
+| **System behaviour** | Movement may still be detected, but **contradictions** fire, confidence drops, **`should_abstain`**. Narrative refuses a root-cause claim. War Room returns **Human review required** — no forced action. |
+| **What to notice** | Yellow contradiction warning; no confident “the cause is X”. |
+
+### S3 — New SKU (sparse history) → **explain, hedge**
+
+| | |
+|---|---|
+| **What happens** | Newly launched SKU-E units spike under a launch promo; &lt; ~6 weeks of history. |
+| **System behaviour** | Explains with promotion as driver, but **confidence is capped** (≤ 55%) and history is marked insufficient. Honest uncertainty, not overconfidence. |
+| **What to notice** | Low confidence tile; thin-history behaviour. |
+
+### S4 — East control → **stay silent**
+
+| | |
+|---|---|
+| **What happens** | Ordinary East week; **no** planted shock. |
+| **System behaviour** | Not material → route **`rules_only`**. No War Room, no LLM spend for noise. Used to measure **false-alarm rate**. |
+| **What to notice** | Near-zero movement; no decision panel. |
+
+### RBAC — West manager cannot read North / East
+
+| | |
+|---|---|
+| **How to demo** | User = `west_manager`, Scenario = S2 (North) or S4 (East). |
+| **System behaviour** | Governed query raises **AccessDenied** (row-level policy). UI shows a clear governance message instead of crashing. Same principal also filters documents **before** ranking — the AI cannot see what the human cannot see. |
+| **Audit tab** | Button “Exercise West manager denied East read” writes a denial into the audit log. |
+
+### Personas (same Evidence Pack)
+
+| Persona | Intent |
+|---|---|
+| `analyst` | Precise drivers + citations |
+| `cfo` | Short, decision-dense summary |
+| `ops` | Action-oriented wording |
+
+Truth does not change — only depth and tone.
+
+---
+
+## Quick start for judges (clone → run)
+
+**Requirements:** Python **3.11+**, internet only for `pip install` (API keys optional).
+
+All commands below are run from the **repository root** (the folder that contains
+`verity/`, `requirements.txt`, and this `README.md`).
+
+### 1. Clone and enter the repo
+
+```bash
+git clone <your-repo-url>
+cd "Business Intelligence"
+```
+
+(Use your actual clone URL and folder name.)
+
+### 2. Create a virtual environment (recommended)
+
+**Windows (PowerShell):**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+```
+
+**macOS / Linux:**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
+```
 
-# Generate the synthetic world and build the warehouse
+No cloud account is required. Optional API keys (next step) only improve narrative
+quality; the full pipeline runs offline without them.
+
+### 4. (Optional) API keys for live LLM narratives
+
+```bash
+# Windows
+copy .env.example .env
+
+# macOS / Linux
+cp .env.example .env
+```
+
+Edit `.env` if you have keys (all optional):
+
+```text
+GEMINI_API_KEY=...       # primary embeddings + generation
+OPENROUTER_API_KEY=...   # generation fallback
+HF_TOKEN=...             # Hugging Face generation fallback
+```
+
+With **no** keys: offline LSA-style embeddings + deterministic template generator.
+Never commit a real `.env` (it is gitignored).
+
+### 5. Build the synthetic warehouse (first time)
+
+```bash
 python -m verity.scripts build
+```
 
-# Run the deterministic CLI demo
-python -m verity.scripts demo
+This generates ERP / promotion / CRM data and ground truth into DuckDB
+(`data/warehouse.duckdb`). Deterministic for seed `20260822`.
 
-# Run the API
-uvicorn verity.app.api:app --reload
+### 6. Run the demo UI (recommended for judging)
 
-# Run the demo UI
+```bash
 streamlit run verity/app/ui.py
 ```
 
-API entry points:
+Open **http://localhost:8501** in a browser.
+
+Suggested first path: **User = analyst**, **Scenario = S1**, then try S2 → S4 →
+`west_manager` + S2 for RBAC.
+
+### 7. Other ways to run
+
+**CLI (prints assessment, narrative, decision):**
+
+```bash
+python -m verity.scripts demo
+# or a specific scenario:
+python -m verity.scripts demo --scenario S2
+```
+
+**REST API:**
+
+```bash
+uvicorn verity.app.api:app --reload
+```
+
+Then open **http://localhost:8000/docs** (Swagger) or call:
 
 | Endpoint | Purpose |
 |---|---|
-| `/health` | service readiness |
-| `/scenarios` | available synthetic scenarios |
-| `/scenario/S1` | full signal to evidence to War Room to action payload |
-| `/lineage/net_revenue` | KPI lineage and definition conflict |
-| `/evaluation` | measured detection, retrieval and abstention metrics |
-| `/model-health` | drift and review panel values |
-| `/audit` | audit log |
-| `/risk-radar` | scenario replay risk table |
+| `GET /health` | readiness |
+| `GET /scenarios` | list synthetic scenarios |
+| `GET /scenario/S1?principal=analyst&persona=analyst` | full pipeline for S1 |
+| `GET /lineage/net_revenue` | KPI lineage + definition conflict |
+| `GET /evaluation` | measured metrics |
+| `GET /model-health` | health / drift panel values |
+| `GET /audit` | audit log |
+| `POST /audit/exercise-denial` | force a West→East denial |
+| `GET /risk-radar` | scenario risk strip |
 
-## API Keys
+**Tests (prove the prototype):**
 
-Every key is optional. With no hosted provider configured, Verity still runs
-using offline LSA embeddings and a deterministic template generator.
-
-Copy `.env.example` to `.env` and set any of:
-
-```text
-GEMINI_API_KEY=...      # primary embeddings + generation
-OPENROUTER_API_KEY=...  # generation fallback
-HF_TOKEN=...            # Hugging Face generation fallback
+```bash
+python -m pytest
 ```
 
-The generation chain is Gemini, OpenRouter/OpenAI-compatible, Hugging Face,
-then offline template. OpenRouter and Hugging Face are chat-only fallbacks here;
-they are skipped for embeddings.
+Expect on the order of **90+** passing tests (no network required).
 
-## Synthetic Scenarios
+### Minimal “I just cloned it” checklist
 
-| Scenario | Movement | Planted truth | Expected behaviour |
-|---|---|---|---|
-| S1 West multi-factor | about -12% | inventory, promotion, competitor activity | explain and decide |
-| S2 North contradiction | about -9% | cause is not recoverable from evidence | abstain |
-| S3 SKU-E launch | +22% | promotion with sparse history | explain with lower confidence |
-| S4 East control | about 0% | no shock | stay silent |
+```bash
+python -m venv .venv
+# activate .venv  (see OS commands above)
+pip install -r requirements.txt
+python -m verity.scripts build
+streamlit run verity/app/ui.py
+```
 
-S1 carries an explicit interaction residual. Verity displays that residual
-instead of forcing contributions to sum to 100%.
+---
 
-## Layout
+## Demo users
+
+| UI value | Role | Scope |
+|---|---|---|
+| `analyst` | analyst | Broad KPI access (good default) |
+| `cfo` | executive | Broad access |
+| `west_manager` | regional_manager | **West only** (row filter) |
+| `east_manager` | regional_manager | **East only** |
+
+---
+
+## Repository layout
 
 ```text
 verity/
   analytics/         STL, Isolation Forest, ETS, attribution, PVM, what-if
-  app/               FastAPI and Streamlit surfaces
-  configs/           KPI semantic contract and policy KB
-  datagen/           Synthetic world, ground truth, evidence corpus
+  app/               service.py · api.py (FastAPI) · ui.py (Streamlit)
+  configs/           kpis.yaml (semantic contract) · policies.yaml (decision rights)
+  datagen/           synthetic world, scenarios, documents, ground truth
   governance/        RBAC, audit, cost governor
-  llm/               Provider abstraction and fallback chain
-  rag/               Evidence Engine and Evidence Pack builder
-  semantic.py        KPI contracts, policy loading, lineage graph
-  store.py           DuckDB warehouse and governed query path
-  investigation.py   Persona narratives and citation verification
-  war_room.py        Two-round decision synthesis and action payload
-  evaluation.py      Measured scenario metrics and calibration
-  scripts.py         CLI: build the warehouse, run the demo
+  llm/               provider chain + offline floor
+  rag/               Evidence Engine (retrieve, score, pack)
+  semantic.py        contract + policies + lineage
+  store.py           DuckDB warehouse + governed queries
+  investigation.py   narratives + citation guard
+  war_room.py        multi-objective decision + action payload
+  evaluation.py      measured harness + calibration
+  scripts.py         CLI: build | demo
+tests/               automated verification
+requirements.txt
+.env.example
 ```
 
-## Design Notes
+---
 
-Only four analytical methods are presented as the core stack: STL + Isolation
-Forest, SHAP-style contribution against planted synthetic truth, ETS forecast,
-and Price-Volume-Mix decomposition.
+## Design choices (short)
 
-Retrieval-level RBAC filters documents before ranking. A War Room agent cannot
-reason over evidence that the requesting user is not allowed to retrieve.
+- **Four analytical methods** as the core stack: STL + Isolation Forest, ETS
+  baseline, contribution vs planted truth (SHAP-style), Price–Volume–Mix.
+- **Dual materiality:** statistically unusual **and** commercially meaningful.
+- **Interaction residual** is always shown; contributions are not normalized to 100%.
+- **RBAC inside retrieval** (filter before rank), not a post-hoc UI hide.
+- **Policies cited by ID** (e.g. P018, P031) — decision rights come from the
+  policy KB, not a hardcoded threshold.
+- **KPI definition conflict** (ERP net revenue vs marketing gross booked) is
+  surfaced in lineage, not silently overwritten.
+- **Graceful degradation:** no API keys / no optional vector DB → still runs and
+  stays honest.
 
-Policy documents are retrieved and cited by ID, so decision-rights escalation
-comes from the policy KB rather than a hardcoded threshold.
+---
+
+## Status
+
+Working local prototype: semantic contract, synthetic world + ground truth,
+governed warehouse, analytics, Evidence Engine, citation-guarded narratives,
+Decision War Room, cost governor, evaluation harness, FastAPI + Streamlit.
+
+```bash
+python -m pytest
+```
