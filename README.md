@@ -136,7 +136,7 @@ Truth does not change — only depth and tone.
 
 ---
 
-## Quick start for judges (clone → run)
+## Quick start for (clone → run)
 
 **Requirements:** Python **3.11+**, internet only for `pip install` (API keys optional).
 
@@ -146,11 +146,10 @@ All commands below are run from the **repository root** (the folder that contain
 ### 1. Clone and enter the repo
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/tarungarg18/business-intelligence.git
 cd "Business Intelligence"
 ```
 
-(Use your actual clone URL and folder name.)
 
 ### 2. Create a virtual environment (recommended)
 
@@ -162,34 +161,20 @@ python -m venv .venv
 python -m pip install --upgrade pip
 ```
 
-**macOS / Linux:**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-```
-
 ### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-No cloud account is required. Optional API keys (next step) only improve narrative
-quality; the full pipeline runs offline without them.
-
-### 4. (Optional) API keys for live LLM narratives
+### 4. API keys for live LLM narratives
 
 ```bash
 # Windows
 copy .env.example .env
-
-# macOS / Linux
-cp .env.example .env
 ```
 
-Edit `.env` if you have keys (all optional):
+Edit `.env` 
 
 ```text
 GEMINI_API_KEY=...       # primary embeddings + generation
@@ -198,7 +183,6 @@ HF_TOKEN=...             # Hugging Face generation fallback
 ```
 
 With **no** keys: offline LSA-style embeddings + deterministic template generator.
-Never commit a real `.env` (it is gitignored).
 
 ### 5. Build the synthetic warehouse (first time)
 
@@ -209,7 +193,7 @@ python -m verity.scripts build
 This generates ERP / promotion / CRM data and ground truth into DuckDB
 (`data/warehouse.duckdb`). Deterministic for seed `20260822`.
 
-### 6. Run the demo UI (recommended for judging)
+### 6. Run the demo UI 
 
 ```bash
 streamlit run verity/app/ui.py
@@ -258,28 +242,6 @@ python -m pytest
 
 Expect on the order of **90+** passing tests (no network required).
 
-### Minimal “I just cloned it” checklist
-
-```bash
-python -m venv .venv
-# activate .venv  (see OS commands above)
-pip install -r requirements.txt
-python -m verity.scripts build
-streamlit run verity/app/ui.py
-```
-
----
-
-## Demo users
-
-| UI value | Role | Scope |
-|---|---|---|
-| `analyst` | analyst | Broad KPI access (good default) |
-| `cfo` | executive | Broad access |
-| `west_manager` | regional_manager | **West only** (row filter) |
-| `east_manager` | regional_manager | **East only** |
-
----
 
 ## Repository layout
 
@@ -305,7 +267,7 @@ requirements.txt
 
 ---
 
-## Design choices (short)
+## Design choices
 
 - **Four analytical methods** as the core stack: STL + Isolation Forest, ETS
   baseline, contribution vs planted truth (SHAP-style), Price–Volume–Mix.
@@ -321,12 +283,3 @@ requirements.txt
 
 ---
 
-## Status
-
-Working local prototype: semantic contract, synthetic world + ground truth,
-governed warehouse, analytics, Evidence Engine, citation-guarded narratives,
-Decision War Room, cost governor, evaluation harness, FastAPI + Streamlit.
-
-```bash
-python -m pytest
-```
